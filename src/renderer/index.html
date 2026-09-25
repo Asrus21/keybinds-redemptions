@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <!-- Nada de script inline nem de rede: só os arquivos do próprio app e as
+         imagens das recompensas/avatar, que vêm do CDN da Twitch. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://static-cdn.jtvnw.net; font-src 'self'"
+    />
+    <title>Keybinds Redemptions</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="top">
+        <div class="brand">
+          <img src="../../assets/icon.png" alt="" width="40" height="40" />
+          <div>
+            <h1>Keybinds <span>Redemptions</span></h1>
+            <p>Resgate na Twitch → tecla no seu PC</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span id="conn-pill" class="pill" data-state="offline"><i></i><b>Desconectado</b></span>
+          <button id="pause-btn" type="button" class="btn">Pausar</button>
+          <button id="stop-btn" type="button" class="btn danger" title="Interrompe o que estiver rodando, esvazia a fila e solta todas as teclas">
+            Parar tudo
+          </button>
+        </div>
+      </header>
+
+      <div id="notice" class="banner error" hidden>
+        <span id="notice-text"></span>
+        <button id="notice-close" type="button" class="icon-btn" aria-label="Fechar aviso">×</button>
+      </div>
+      <div id="paused-banner" class="banner warn" hidden>
+        <span><strong>Pausado.</strong> Os resgates aparecem na atividade, mas nenhuma tecla é apertada.</span>
+      </div>
+      <div id="sim-banner" class="banner info" hidden></div>
+
+      <main class="layout">
+        <div class="col-side">
+          <section class="card" id="account-card" aria-live="polite"></section>
+
+          <section class="card">
+            <h2>Preferências</h2>
+            <label class="check">
+              <input type="checkbox" id="set-tray" />
+              <span>Fechar a janela deixa o app rodando na bandeja</span>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="set-login" />
+              <span>Abrir junto com o Windows (já na bandeja)</span>
+            </label>
+            <p class="meta" id="meta-line"></p>
+          </section>
+        </div>
+
+        <div class="col-main">
+          <section class="card">
+            <div class="card-head">
+              <h2>Recompensas → teclas</h2>
+              <div class="row-actions">
+                <button id="refresh-rewards" type="button" class="btn ghost">Atualizar recompensas</button>
+                <button id="add-rule" type="button" class="btn primary">+ Nova regra</button>
+              </div>
+            </div>
+            <p class="hint" id="rewards-status"></p>
+            <div id="rules-list" class="rules"></div>
+            <div id="rules-empty" class="empty">
+              <p><strong>Nenhuma regra ainda.</strong> Clique em “+ Nova regra”, escolha a recompensa e a tecla.</p>
+              <p class="hint">
+                Dica: F13 a F24 não existem no teclado comum — são ótimas para atalhos do OBS, porque não
+                conflitam com nada do jogo.
+              </p>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-head">
+              <h2>Atividade</h2>
+              <span id="queue-count" class="meta"></span>
+            </div>
+            <ol id="log-list" class="log"></ol>
+            <p id="log-empty" class="hint">Os resgates vão aparecer aqui assim que chegarem.</p>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <dialog id="key-dialog" aria-labelledby="key-dialog-title">
+      <h3 id="key-dialog-title">Qual tecla apertar?</h3>
+      <p class="hint" id="key-dialog-reward"></p>
+      <div id="capture" class="capture" tabindex="0" role="textbox" aria-label="Aperte a tecla ou combinação">
+        <div id="capture-keys" class="chips big"></div>
+        <p id="capture-hint">Aperte a tecla ou a combinação agora (ex.: Ctrl + G)</p>
+      </div>
+      <div class="or"><span>ou escolha da lista</span></div>
+      <div class="picker">
+        <select id="key-select" aria-label="Escolher tecla da lista"></select>
+        <button id="key-add" type="button" class="btn">Adicionar</button>
+      </div>
+      <p class="hint small">Esc fecha esta janela. Para usar a tecla Esc, escolha na lista.</p>
+      <div class="dialog-actions">
+        <button id="key-clear" type="button" class="btn ghost">Limpar</button>
+        <span class="spacer"></span>
+        <button id="key-cancel" type="button" class="btn">Cancelar</button>
+        <button id="key-save" type="button" class="btn primary">Salvar</button>
+      </div>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <script src="../shared/keys.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

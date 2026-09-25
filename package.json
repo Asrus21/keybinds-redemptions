@@ -1,0 +1,53 @@
+{
+  "name": "keybinds-redemptions",
+  "productName": "Keybinds Redemptions",
+  "version": "0.1.0",
+  "description": "Aperta uma tecla no PC do streamer quando alguém resgata uma recompensa de pontos do canal na Twitch.",
+  "author": "Thiago Arruda <tarruda1513@gmail.com>",
+  "private": true,
+  "main": "src/main/main.js",
+  "twitchClientId": "",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test \"test/*.test.js\"",
+    "dist": "electron-builder --win --publish never"
+  },
+  "dependencies": {
+    "koffi": "2.16.3",
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "app.asrus.keybinds-redemptions",
+    "productName": "Keybinds Redemptions",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "!node_modules/koffi/build/koffi/{darwin,freebsd,linux,musl,openbsd}_*/**",
+      "!node_modules/koffi/{src,vendor,doc}/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-Setup-${version}.${ext}"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}.${ext}"
+    }
+  }
+}
