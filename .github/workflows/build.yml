@@ -1,0 +1,52 @@
+# Testes em todo push/PR e o instalador do Windows como artefato do run.
+# Em tag v* (ex.: v0.1.0) o instalador também vira uma Release no GitHub.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          # Os testes não abrem o Electron; não precisa baixar o binário.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - run: npm test
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Roda de novo no Windows: aqui o teste da user32.dll de verdade vale.
+      - run: npm test
+      - run: npx electron-builder --win --x64 --publish never
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keybinds-redemptions-windows
+          path: dist/*.exe
+          if-no-files-found: error
+      - name: Publicar release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/*.exe --title "$GITHUB_REF_NAME" --generate-notes
