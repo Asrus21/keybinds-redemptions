@@ -81,14 +81,14 @@ function createWindow({ hidden }) {
 
   win.on('close', (e) => {
     if (quitting || !controller.config.settings.closeToTray) return;
-    // Fechar só esconde: o app continua escutando os resgates na bandeja.
+    // Fechar só esconde: o app continua escutando os eventos na bandeja.
     e.preventDefault();
     win.hide();
     if (!trayHintShown && Notification.isSupported()) {
       trayHintShown = true;
       new Notification({
         title: 'Keybinds Redemptions continua rodando',
-        body: 'Os resgates seguem apertando teclas. Para sair de vez, use o ícone da bandeja.',
+        body: 'Os eventos seguem apertando teclas. Para sair de vez, use o ícone da bandeja.',
         icon: path.join(ASSETS, 'icon.png'),
       }).show();
     }
@@ -109,7 +109,7 @@ function refreshTray() {
   if (key === trayKey) return;
   trayKey = key;
   const conn = {
-    online: 'escutando resgates',
+    online: 'escutando eventos',
     connecting: 'conectando…',
     reconnecting: 'reconectando…',
     offline: 'desconectado',
@@ -120,7 +120,7 @@ function refreshTray() {
       { label: 'Abrir', click: showWindow },
       { type: 'separator' },
       {
-        label: 'Pausar resgates',
+        label: 'Pausar (eventos não apertam teclas)',
         type: 'checkbox',
         checked: s.paused,
         click: (item) => controller.setPaused(item.checked),
@@ -193,6 +193,8 @@ function ipcApi() {
     setPaused: (paused) => controller.setPaused(paused),
     stopAll: () => controller.stopAll(),
     updateSettings: (patch) => controller.updateSettings(patch),
+    connectDonation: (name, credentials) => controller.connectDonation(name, credentials),
+    disconnectDonation: (name) => controller.disconnectDonation(name),
     dismissNotice: () => controller.setNotice(''),
     openExternal: (url) => openExternal(url),
   };

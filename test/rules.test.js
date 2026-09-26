@@ -1,0 +1,81 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { normalizeRule, patchRule, matchRules, describeTrigger } = require('../src/main/rules');
+
+function rule(fields) {
+  return normalizeRule({ keys: ['KeyG'], ...fields });
+}
+
+test('regra antiga (sem gatilho) continua sendo de recompensa', () => {
+  const r = normalizeRule({ id: 'x', rewardId: 'abc', keys: ['Space'] });
+  assert.equal(r.trigger, 'reward');
+  assert.equal(r.rewardId, 'abc');
+});
+
+test('faixa de valor: vírgula brasileira, centavos, máximo menor que o mínimo', () => {
+  const d = rule({ trigger: 'donation', min: '10,5', max: '5' });
+  assert.equal(d.min, 10.5);
+  assert.equal(d.max, 10.5, 'máximo abaixo do mínimo sobe para o mínimo');
+  assert.equal(rule({ trigger: 'donation', min: 1.239 }).min, 1.24);
+  assert.equal(rule({ trigger: 'bits', min: 99.6 }).min, 100, 'bits é inteiro');
+  assert.equal(rule({ trigger: 'bits', min: -5 }).min, 1);
+  assert.equal(rule({ trigger: 'donation', max: '' }).max, 0, 'vazio = sem limite');
+  assert.equal(rule({ trigger: 'nada' }).trigger, 'reward');
+  assert.equal(rule({ trigger: 'sub', tier: '9000' }).tier, 'any');
+  assert.equal(rule({ trigger: 'donation', source: 'paypal' }).source, 'any');
+});
+
+test('trocar o tipo de gatilho volta a faixa para o padrão do novo tipo', () => {
+  const bits = rule({ trigger: 'bits', min: 500, max: 1000 });
+  const donation = patchRule(bits, { trigger: 'donation' });
+  assert.equal(donation.min, 5);
+  assert.equal(donation.max, 0);
+  // Mudando tipo e valor juntos, vale o valor pedido.
+  assert.equal(patchRule(bits, { trigger: 'gift', min: 3 }).min, 3);
+});
+
+test('faixas de valor: vale só a de maior "a partir de" que servir', () => {
+  const rules = [
+    rule({ id: 'd5', trigger: 'donation', min: 5 }),
+    rule({ id: 'd10', trigger: 'donation', min: 10 }),
+    rule({ id: 'd10b', trigger: 'donation', min: 10, keys: ['KeyH'] }),
+    rule({ id: 'd50', trigger: 'donation', min: 50, max: 99.99 }),
+    rule({ id: 'bits', trigger: 'bits', min: 1 }),
+  ];
+  const ids = (ev) => matchRules(rules, ev).map((r) => r.id);
+  assert.deepEqual(ids({ kind: 'donation', amount: 4.99, source: 'livepix' }), []);
+  assert.deepEqual(ids({ kind: 'donation', amount: 5, source: 'livepix' }), ['d5']);
+  assert.deepEqual(ids({ kind: 'donation', amount: 12, source: 'livepix' }), ['d10', 'd10b'], 'mesma faixa: as duas');
+  assert.deepEqual(ids({ kind: 'donation', amount: 60, source: 'livepix' }), ['d50']);
+  assert.deepEqual(ids({ kind: 'donation', amount: 100, source: 'livepix' }), ['d10', 'd10b'], 'acima do máximo cai na faixa de baixo');
+  assert.deepEqual(ids({ kind: 'bits', amount: 1 }), ['bits']);
+});
+
+test('doação filtra pelo serviço; sub filtra pelo tier; recompensa pelo id', () => {
+  const rules = [
+    rule({ id: 'se', trigger: 'donation', min: 1, source: 'streamelements' }),
+    rule({ id: 'any', trigger: 'donation', min: 1 }),
+    rule({ id: 't1', trigger: 'sub', tier: '1000' }),
+    rule({ id: 'tany', trigger: 'sub' }),
+    rule({ id: 'rw', trigger: 'reward', rewardId: 'r1' }),
+    rule({ id: 'off', trigger: 'reward', rewardId: 'r1', enabled: false }),
+    rule({ id: 'nokey', trigger: 'reward', rewardId: 'r1', keys: [] }),
+  ];
+  const ids = (ev) => matchRules(rules, ev).map((r) => r.id);
+  assert.deepEqual(ids({ kind: 'donation', amount: 5, source: 'streamelements' }), ['se', 'any']);
+  assert.deepEqual(ids({ kind: 'donation', amount: 5, source: 'streamlabs' }), ['any']);
+  assert.deepEqual(ids({ kind: 'sub', tier: '1000' }), ['t1', 'tany']);
+  assert.deepEqual(ids({ kind: 'sub', tier: '3000' }), ['tany']);
+  assert.deepEqual(ids({ kind: 'reward', rewardId: 'r1' }), ['rw']);
+  assert.deepEqual(ids({ kind: 'reward', rewardId: 'r2' }), []);
+  assert.deepEqual(ids({ kind: 'gift', amount: 5 }), []);
+});
+
+test('descrição curta do gatilho (vai para o registro do "Testar")', () => {
+  assert.equal(describeTrigger(rule({ trigger: 'bits', min: 1000 })), 'Bits: 1.000 bits ou mais');
+  assert.equal(describeTrigger(rule({ trigger: 'gift', min: 5, max: 10 })), 'Gift sub: 5 a 10 subs');
+  assert.equal(describeTrigger(rule({ trigger: 'sub', tier: '2000' })), 'Sub (Tier 2)');
+  assert.match(describeTrigger(rule({ trigger: 'donation', min: 10 })), /^Doação: 10,00 ou mais \(qualquer serviço\)$/);
+  assert.equal(describeTrigger(rule({ trigger: 'reward', rewardTitle: 'Pular' })), 'Pular');
+});

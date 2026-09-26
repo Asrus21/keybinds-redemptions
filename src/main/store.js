@@ -4,6 +4,7 @@
 //   config.json — Client ID, regras e preferências. Nada secreto.
 //   tokens.bin  — tokens da Twitch, cifrados com o safeStorage do Electron
 //                 (DPAPI no Windows: só o seu usuário do Windows consegue ler).
+//   donations.bin — tokens dos serviços de doação, cifrados do mesmo jeito.
 //
 // Escrita atômica (arquivo temporário + rename) para uma queda de energia no
 // meio do salvamento não deixar um JSON pela metade.
@@ -43,7 +44,6 @@ class Store {
     this.cipher = cipher && cipher.available ? cipher : null;
     this.log = log;
     this.configFile = path.join(dir, 'config.json');
-    this.tokensFile = path.join(dir, 'tokens.bin');
     fs.mkdirSync(dir, { recursive: true });
   }
 
@@ -74,9 +74,22 @@ class Store {
   }
 
   loadTokens() {
+    return this.loadSecret('tokens');
+  }
+
+  saveTokens(tokens) {
+    this.saveSecret('tokens', tokens);
+  }
+
+  secretFile(name) {
+    return path.join(this.dir, `${name}.bin`);
+  }
+
+  /** Lê um JSON cifrado (`<nome>.bin`). null se não existe ou não dá para ler. */
+  loadSecret(name) {
     let raw;
     try {
-      raw = fs.readFileSync(this.tokensFile);
+      raw = fs.readFileSync(this.secretFile(name));
     } catch {
       return null;
     }
@@ -88,21 +101,23 @@ class Store {
           : null;
       return text ? JSON.parse(text) : null;
     } catch (err) {
-      this.log(`Não deu para ler os tokens salvos (${err.message}); faça login de novo.`);
+      this.log(`Não deu para ler ${name}.bin (${err.message}); será preciso configurar de novo.`);
       return null;
     }
   }
 
-  saveTokens(tokens) {
-    if (!tokens) {
-      fs.rmSync(this.tokensFile, { force: true });
+  /** Grava um JSON cifrado; null apaga o arquivo. */
+  saveSecret(name, value) {
+    const file = this.secretFile(name);
+    if (!value) {
+      fs.rmSync(file, { force: true });
       return;
     }
-    const text = JSON.stringify(tokens);
+    const text = JSON.stringify(value);
     const data = this.cipher
       ? this.cipher.encrypt(text)
       : Buffer.concat([Buffer.from('plain:'), Buffer.from(text, 'utf8')]);
-    writeAtomic(this.tokensFile, data);
+    writeAtomic(file, data);
   }
 }
 

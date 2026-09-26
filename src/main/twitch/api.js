@@ -147,12 +147,12 @@ class TwitchApi {
       .sort((a, b) => a.cost - b.cost || a.title.localeCompare(b.title));
   }
 
-  /** Liga a sessão da EventSub (WebSocket) aos resgates do canal. */
-  async subscribeRedemptions(sessionId, broadcasterId) {
+  /** Liga a sessão da EventSub (WebSocket) a um tipo de evento do canal. */
+  async subscribeEvent(type, version, sessionId, broadcasterId) {
     const { data } = await this.helix('POST', '/eventsub/subscriptions', {
       body: {
-        type: 'channel.channel_points_custom_reward_redemption.add',
-        version: '1',
+        type,
+        version,
         condition: { broadcaster_user_id: broadcasterId },
         transport: { method: 'websocket', session_id: sessionId },
       },

@@ -1,5 +1,5 @@
-// O "cérebro" do app, sem nada de Electron: login, conexão com a Twitch,
-// regras e a fila de teclas. A janela só mostra o estado daqui e chama os
+// O "cérebro" do app, sem nada de Electron: login, conexão com a Twitch e
+// com os serviços de doação, regras e a fila de teclas. A janela só mostra o estado daqui e chama os
 // métodos públicos; os testes fazem o mesmo com uma Twitch de mentira.
 //
 // Eventos: 'state' (algo mudou — a janela pede o snapshot), 'log' (entrada
@@ -10,12 +10,34 @@ const { EventEmitter } = require('node:events');
 const crypto = require('node:crypto');
 
 const { ActionRunner } = require('./runner');
-const { newRule, normalizeRule, patchRule, isRunnable, actionOf } = require('./rules');
+const {
+  newRule,
+  normalizeRule,
+  patchRule,
+  matchRules,
+  describeTrigger,
+  formatMoney,
+  actionOf,
+  TIER_LABELS,
+  SOURCE_LABELS,
+} = require('./rules');
 const { startDeviceFlow, pollDeviceToken, revokeToken, SCOPES } = require('./twitch/auth');
 const { TwitchApi, HelixError, SessionExpiredError } = require('./twitch/api');
 const { EventSubClient, EVENTSUB_URL } = require('./twitch/eventsub');
+const { DonationHub, CATALOG } = require('./donations');
 
 const REDEMPTION_TYPE = 'channel.channel_points_custom_reward_redemption.add';
+
+// Eventos da Twitch que o app escuta. Só os resgates são obrigatórios: se a
+// Twitch recusar bits ou subs (canal sem esse recurso, por exemplo), o resto
+// continua funcionando.
+const TWITCH_EVENTS = [
+  { type: REDEMPTION_TYPE, version: '1', label: 'resgates', required: true },
+  { type: 'channel.cheer', version: '1', label: 'bits' },
+  { type: 'channel.subscribe', version: '1', label: 'subs' },
+  { type: 'channel.subscription.message', version: '1', label: 'renovações de sub' },
+  { type: 'channel.subscription.gift', version: '1', label: 'gift subs' },
+];
 const LOG_SIZE = 200;
 const VALIDATE_EVERY_MS = 60 * 60 * 1000;
 const RETRY_OFFLINE_MS = 30 * 1000;
@@ -35,6 +57,7 @@ class Controller extends EventEmitter {
    *   envClientId?: string,
    *   defaultClientId?: string,
    *   testDelayMs?: number,
+   *   donationDeps?: object,
    * }} opts
    */
   constructor({
@@ -47,6 +70,7 @@ class Controller extends EventEmitter {
     envClientId = '',
     defaultClientId = '',
     testDelayMs = 3000,
+    donationDeps,
   }) {
     super();
     this.store = store;
@@ -61,6 +85,13 @@ class Controller extends EventEmitter {
 
     this.runner = new ActionRunner({ keyboard });
     this.runner.on('change', () => this.changed());
+
+    this.donations = new DonationHub({ deps: donationDeps });
+    this.donations.on('change', () => this.changed());
+    this.donations.on('log', (m) => this.info(m));
+    this.donations.on('donation', (d) => this.handleDonation(d));
+    this.donationCreds = {};
+    this.subscribeWarned = new Set();
 
     this.config = null;
     this.tokens = null;
@@ -114,6 +145,7 @@ class Controller extends EventEmitter {
       settings: this.config.settings,
       queue: this.runner.pending,
       keyboard: { name: this.keyboard.name, simulated: !!this.keyboard.simulated },
+      donations: this.donations.status(this.donationCreds),
       notice: this.notice,
     };
   }
@@ -161,6 +193,7 @@ class Controller extends EventEmitter {
     this.config = this.store.loadConfig();
     this.config.rules = this.config.rules.map(normalizeRule);
     this.tokens = this.store.loadTokens();
+    this.donationCreds = this.store.loadSecret('donations') || {};
     if (this.keyboard.simulated) {
       this.info('Fora do Windows as teclas são só simuladas: aparecem aqui no registro, mas nada é apertado.');
     }
@@ -169,6 +202,9 @@ class Controller extends EventEmitter {
   /** Carrega (se ainda não carregou) e retoma a sessão salva, se houver. */
   async init() {
     if (!this.config) this.load();
+    for (const [name, creds] of Object.entries(this.donationCreds)) {
+      if (CATALOG[name]) this.donations.connect(name, creds);
+    }
     if (this.tokens && this.clientId) {
       await this.resume();
     }
@@ -197,7 +233,9 @@ class Controller extends EventEmitter {
         throw new SessionExpiredError('O Client ID mudou. Entre de novo com a Twitch.');
       }
       if (!SCOPES.every((s) => info.scopes.includes(s))) {
-        throw new SessionExpiredError('Falta permissão para ler os resgates. Entre de novo com a Twitch.');
+        throw new SessionExpiredError(
+          'O app precisa de mais permissões da Twitch (para bits e subs). Entre de novo com a Twitch.'
+        );
       }
       this.account = await this.api.getSelf();
       this.changed();
@@ -341,57 +379,147 @@ class Controller extends EventEmitter {
     const client = new EventSubClient({
       url: this.eventSubUrl,
       ...(this.WebSocket ? { WebSocket: this.WebSocket } : {}),
-      subscribe: async (sessionId) => {
-        try {
-          await this.api.subscribeRedemptions(sessionId, this.account.id);
-        } catch (err) {
-          if (err instanceof SessionExpiredError) err.fatal = true;
-          // 400/403: pedido recusado de vez (escopo, canal…). Tentar de novo
-          // não muda nada.
-          if (err instanceof HelixError && (err.status === 400 || err.status === 403)) err.fatal = true;
-          throw err;
-        }
-      },
+      subscribe: (sessionId) => this.subscribeAll(sessionId),
     });
     this.eventsub = client;
 
     client.on('status', (status, detail) => {
       this.connection = status;
       this.connectionDetail = detail || '';
-      if (status === 'online') this.info('Escutando os resgates do canal.');
+      if (status === 'online') this.info('Escutando os eventos do canal.');
       this.changed();
     });
     client.on('log', (text) => this.info(text));
     client.on('notification', ({ type, event }) => {
-      if (type === REDEMPTION_TYPE && event) this.handleRedemption(event);
+      if (event) this.handleTwitchEvent(type, event);
     });
     client.on('revocation', (sub) => {
       const status = sub.status || '';
       if (status === 'authorization_revoked' || status === 'user_removed') {
         this.signOut('A autorização do app foi removida na Twitch. Entre de novo.');
       } else {
-        this.error(`A Twitch cancelou a inscrição dos resgates (${status || 'sem motivo'}).`);
+        this.error(`A Twitch cancelou a inscrição em ${sub.type || 'um evento'} (${status || 'sem motivo'}).`);
       }
     });
     client.on('fatal', (err) => {
       if (err instanceof SessionExpiredError) return this.signOut(err.message);
       this.connection = 'offline';
-      this.connectionDetail = `A Twitch recusou a inscrição nos resgates: ${err.message}`;
+      this.connectionDetail = `A Twitch recusou a inscrição nos eventos: ${err.message}`;
       this.error(this.connectionDetail);
       this.changed();
     });
     client.start();
   }
 
-  handleRedemption(event) {
-    const reward = event.reward || {};
+  /**
+   * Inscreve a sessão da EventSub em todos os eventos. Os resgates são
+   * obrigatórios (falha = erro); bits e subs são "se der" — canal sem esse
+   * recurso só perde esses gatilhos, com um aviso no registro.
+   */
+  async subscribeAll(sessionId) {
+    for (const ev of TWITCH_EVENTS) {
+      try {
+        await this.api.subscribeEvent(ev.type, ev.version, sessionId, this.account.id);
+      } catch (err) {
+        if (err instanceof SessionExpiredError) err.fatal = true;
+        // 400/403: recusado de vez (escopo, canal…). Tentar de novo não muda.
+        const refused = err instanceof HelixError && (err.status === 400 || err.status === 403);
+        if (ev.required) {
+          if (refused) err.fatal = true;
+          throw err;
+        }
+        if (err.fatal) throw err;
+        if (!refused) throw err; // erro passageiro: reconecta e tenta tudo de novo
+        if (!this.subscribeWarned.has(ev.type)) {
+          this.subscribeWarned.add(ev.type);
+          this.error(`A Twitch não liberou os eventos de ${ev.label}: ${err.message}`);
+        }
+      }
+    }
+  }
+
+  userName(event) {
+    return event.user_name || event.user_login || 'Anônimo';
+  }
+
+  /** Traduz um evento da EventSub para o formato das regras. */
+  handleTwitchEvent(type, e) {
+    switch (type) {
+      case REDEMPTION_TYPE: {
+        const reward = e.reward || {};
+        return this.dispatch({
+          kind: 'reward',
+          rewardId: reward.id,
+          user: this.userName(e),
+          action: 'resgatou',
+          target: reward.title || '(recompensa)',
+        });
+      }
+      case 'channel.cheer':
+        return this.dispatch({
+          kind: 'bits',
+          amount: Number(e.bits) || 0,
+          user: e.is_anonymous ? 'Anônimo' : this.userName(e),
+          action: 'mandou',
+          target: `${(Number(e.bits) || 0).toLocaleString('pt-BR')} bits`,
+        });
+      case 'channel.subscribe':
+        // Cada sub dada de presente também chega aqui (is_gift). Quem conta
+        // é o evento do gift, senão um gift de 10 apertaria a tecla 11 vezes.
+        if (e.is_gift) return undefined;
+        return this.dispatch({
+          kind: 'sub',
+          tier: e.tier,
+          user: this.userName(e),
+          action: 'assinou',
+          target: TIER_LABELS[e.tier] || 'sub',
+        });
+      case 'channel.subscription.message':
+        return this.dispatch({
+          kind: 'sub',
+          tier: e.tier,
+          user: this.userName(e),
+          action: 'renovou',
+          target: `${TIER_LABELS[e.tier] || 'sub'} · ${e.cumulative_months || '?'} meses`,
+        });
+      case 'channel.subscription.gift': {
+        const total = Number(e.total) || 0;
+        return this.dispatch({
+          kind: 'gift',
+          amount: total,
+          user: e.is_anonymous ? 'Anônimo' : this.userName(e),
+          action: 'deu',
+          target: `${total} ${total === 1 ? 'sub' : 'subs'} de presente`,
+        });
+      }
+      default:
+        return undefined;
+    }
+  }
+
+  handleDonation(d) {
+    return this.dispatch({
+      kind: 'donation',
+      amount: d.amount,
+      source: d.source,
+      user: d.user,
+      action: 'doou',
+      target: formatMoney(d.amount, d.currency),
+      via: `${SOURCE_LABELS[d.source] || d.source}${d.test ? ' · teste' : ''}`,
+    });
+  }
+
+  /** Acha as regras do evento e põe na fila (ou só registra, se pausado). */
+  dispatch(ev) {
     const base = {
-      kind: 'redeem',
-      user: event.user_name || event.user_login || 'alguém',
-      reward: reward.title || '(recompensa)',
-      cost: reward.cost,
+      kind: 'event',
+      trigger: ev.kind,
+      user: ev.user,
+      action: ev.action,
+      target: ev.target,
+      via: ev.via || '',
     };
-    const rules = this.config.rules.filter((r) => r.rewardId === reward.id && isRunnable(r));
+    const rules = matchRules(this.config.rules, ev);
     if (rules.length === 0) {
       this.addLog({ ...base, outcome: 'ignored' });
       return;
@@ -491,7 +619,7 @@ class Controller extends EventEmitter {
     const rule = this.findRule(id);
     if (!rule.keys.length) throw new Error('Escolha uma tecla antes de testar.');
     await new Promise((r) => setTimeout(r, this.testDelayMs));
-    return this.run(rule, { kind: 'test', reward: rule.rewardTitle || 'Teste' });
+    return this.run(rule, { kind: 'test', target: describeTrigger(rule) });
   }
 
   // ---------------------------------------------------------------- controles
@@ -499,13 +627,42 @@ class Controller extends EventEmitter {
   setPaused(paused) {
     this.config.paused = !!paused;
     this.save();
-    this.info(this.config.paused ? 'Pausado: resgates não apertam teclas.' : 'Retomado: resgates voltaram a apertar teclas.');
+    this.info(this.config.paused ? 'Pausado: os eventos não apertam teclas.' : 'Retomado: os eventos voltaram a apertar teclas.');
     this.changed();
   }
 
   stopAll() {
     const n = this.runner.abortAll();
     if (n) this.info(`Parado: ${n} ${n === 1 ? 'ação interrompida' : 'ações interrompidas'} e teclas soltas.`);
+    this.changed();
+  }
+
+  // ---------------------------------------------------------------- doações
+
+  /** Salva as credenciais de um serviço de doação e conecta. */
+  connectDonation(name, credentials) {
+    const entry = CATALOG[name];
+    if (!entry) throw new Error('Serviço de doação desconhecido.');
+    const creds = {};
+    for (const f of entry.fields) {
+      const v = String((credentials && credentials[f.key]) || '').trim();
+      if (!v) throw new Error(`Preencha o campo ${f.label}.`);
+      if (v.length > 4096) throw new Error(`${f.label} grande demais.`);
+      creds[f.key] = v;
+    }
+    this.donationCreds = { ...this.donationCreds, [name]: creds };
+    this.store.saveSecret('donations', this.donationCreds);
+    this.donations.connect(name, creds);
+    this.info(`${entry.label}: conectando…`);
+    this.changed();
+    return true;
+  }
+
+  disconnectDonation(name) {
+    const { [name]: _removed, ...rest } = this.donationCreds;
+    this.donationCreds = rest;
+    this.store.saveSecret('donations', Object.keys(rest).length ? rest : null);
+    this.donations.disconnect(name);
     this.changed();
   }
 
@@ -524,6 +681,7 @@ class Controller extends EventEmitter {
     clearInterval(this.validateTimer);
     this.cancelLogin();
     if (this.eventsub) this.eventsub.stop();
+    this.donations.stopAll();
     this.runner.abortAll();
   }
 }
