@@ -16,7 +16,7 @@ const { normalizeCombo } = require('../shared/keys');
 
 const TRIGGERS = ['reward', 'bits', 'sub', 'gift', 'donation'];
 const TIERS = ['any', '1000', '2000', '3000'];
-const DONATION_SOURCES = ['any', 'streamelements', 'streamlabs', 'livepix'];
+const DONATION_SOURCES = ['any', 'streamelements', 'streamlabs', 'livepix', 'pixgg'];
 
 const LIMITS = {
   // Jogo lê o teclado uma vez por frame; toque mais curto que ~2 frames pode
@@ -154,6 +154,7 @@ const SOURCE_LABELS = {
   streamelements: 'StreamElements',
   streamlabs: 'Streamlabs',
   livepix: 'LivePix',
+  pixgg: 'PixGG',
 };
 
 function formatMoney(amount, currency) {

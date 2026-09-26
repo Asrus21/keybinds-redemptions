@@ -12,7 +12,7 @@ Exemplos: o resgate “Pular” aperta Espaço no jogo; 1.000 bits ou mais apert
 
 1. O app entra na sua conta da Twitch (login por código, igual ao da TV).
 2. Ele se conecta à **EventSub** da Twitch por WebSocket. Assim a Twitch avisa na hora de cada resgate, bits e sub, sem precisar de servidor nem de porta aberta no roteador.
-3. As doações em dinheiro vêm do serviço que você usa (StreamElements, Streamlabs ou LivePix), conectado com um token seu.
+3. As doações em dinheiro vêm do serviço que você usa (StreamElements, Streamlabs, LivePix ou PixGG), conectado com um token seu.
 4. Quando chega um evento que bate com uma regra, o app aperta a tecla com a `SendInput` do Windows. A tecla vai para **a janela que estiver em foco**, normalmente o jogo.
 
 As teclas são enviadas como **scancode**, a mesma coisa que o teclado físico manda. Por isso funcionam também em jogos que ignoram tecla “virtual” (DirectInput/Raw Input).
@@ -60,10 +60,19 @@ Só precisa se for usar regras de **Doação**. No cartão **Doações**, abra o
 | StreamElements | JWT Token | streamelements.com → Account → Channels → **Show secrets** → JWT Token |
 | Streamlabs | Socket API Token | streamlabs.com → Settings → API Settings → API Tokens → **Your Socket API Token** |
 | LivePix | Client ID e Client Secret | livepix.gg → Configurações → Aplicações → criar uma aplicação com a permissão **messages:read** |
+| PixGG | Client ID e Client Secret | pixgg.com → Aplicações → criar uma aplicação **só para este app** |
 
 Dá para conectar mais de um ao mesmo tempo. No StreamElements, o botão **Emulate → Tip** do painel também dispara as regras, bom para testar.
 
 A LivePix não tem conexão em tempo real aberta: o app consulta as doações novas **a cada 5 segundos**, então pode levar até isso para a tecla apertar.
+
+**PixGG:** o PixGG só avisa de doação por webhook, que precisa de um endereço público na internet, e o seu PC não tem um. Por isso o aviso passa pelo **asrus.app**:
+
+1. Ao conectar, o app cadastra sozinho a URL de webhook da sua aplicação do PixGG para `https://asrus.app/api/pixgg/relay/<código>`. O código é gerado a partir do seu Client Secret: é fixo, ninguém adivinha, e o segredo não sai do PC.
+2. O asrus.app guarda o aviso por até 24 h, sem abrir.
+3. O app busca os avisos novos a cada 3 segundos e confere a assinatura de cada um com o seu Client Secret. Aviso com assinatura errada é descartado.
+
+Como o app troca a URL de webhook da aplicação, use uma aplicação do PixGG **só para ele**. Só doação paga (`donation.paid`) aperta tecla; Pix gerado e não pago é ignorado.
 
 ### 4. Crie as regras
 
@@ -113,7 +122,7 @@ As teclas **F13 a F24** não existem no teclado comum, então nenhum jogo usa. C
 
 - Os tokens da Twitch ficam em `%APPDATA%\Keybinds Redemptions\tokens.bin`, e os dos serviços de doação em `donations.bin`, **cifrados pelo Windows (DPAPI)**. Só o seu usuário do Windows consegue ler.
 - As regras e as preferências ficam em `config.json`, na mesma pasta.
-- O app só se comunica com a Twitch (`id.twitch.tv`, `api.twitch.tv` e `eventsub.wss.twitch.tv`) e com os serviços de doação que você conectar (`realtime.streamelements.com`, `sockets.streamlabs.com`, `oauth.livepix.gg` e `api.livepix.gg`). Ele não envia nada para nenhum outro lugar.
+- O app só se comunica com a Twitch (`id.twitch.tv`, `api.twitch.tv` e `eventsub.wss.twitch.tv`) e com os serviços de doação que você conectar (`realtime.streamelements.com`, `sockets.streamlabs.com`, `oauth.livepix.gg`, `api.livepix.gg`, `app.pixgg.com` e o repasse em `asrus.app`). Ele não envia nada para nenhum outro lugar.
 - As mensagens que os viewers mandam (no resgate, no cheer ou na doação) são ignoradas. A tecla é escolhida só pelo tipo de evento e pelo valor, então ninguém do chat consegue fazer o app apertar outra coisa.
 
 ## Desenvolvimento
@@ -152,7 +161,7 @@ src/
     twitch/auth.js     Device Code Flow, refresh, validate e revoke
     twitch/api.js      Helix (usuário, recompensas, inscrição na EventSub)
     twitch/eventsub.js WebSocket da EventSub: keepalive, reconnect, deduplicação
-    donations/         StreamElements e Streamlabs (Socket.IO), LivePix (consulta à API)
+    donations/         StreamElements e Streamlabs (Socket.IO), LivePix (consulta à API), PixGG (webhook via asrus.app)
   shared/keys.js       tabela de teclas (KeyboardEvent.code → scancode)
   preload.js           ponte segura entre a tela e o processo principal
   renderer/            tela (HTML/CSS/JS, sem framework)

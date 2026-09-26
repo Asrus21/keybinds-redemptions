@@ -16,7 +16,7 @@ class DonationHub extends EventEmitter {
    */
   constructor({ deps = {} } = {}) {
     super();
-    this.deps = { streamelements: {}, streamlabs: {}, livepix: {}, ...deps };
+    this.deps = { streamelements: {}, streamlabs: {}, livepix: {}, pixgg: {}, ...deps };
     this.sources = new Map();
     this.seen = new Set();
   }

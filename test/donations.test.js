@@ -227,3 +227,110 @@ test('hub descarta a mesma doação repetida (reconexão, reenvio)', async (t) =
   assert.equal(status.find((s) => s.name === 'streamelements').configured, true);
   assert.equal(status.find((s) => s.name === 'livepix').configured, false);
 });
+
+// PixGG: API falsa (set-webhook-url) + repasse falso com a mesma semântica da
+// rota /api/pixgg/relay/<rota> do asrus.app.
+function fakePixgg({ secret, rejectCreds = false }) {
+  const calls = [];
+  const relay = []; // { id, rota, corpo, assinatura }
+  let nextId = 1;
+  const post = (rota, payload, { sign = secret } = {}) => {
+    const corpo = JSON.stringify(payload);
+    const assinatura = `sha256=${require('node:crypto').createHmac('sha256', sign).update(corpo).digest('hex')}`;
+    relay.push({ id: nextId++, rota, corpo, assinatura });
+  };
+  const fetch = async (url, init = {}) => {
+    const u = new URL(String(url));
+    calls.push({ url: u, init });
+    if (u.pathname === '/Applications/set-webhook-url') {
+      if (rejectCreds) return new Response('', { status: 401 });
+      return new Response(JSON.stringify({ webhookUrl: JSON.parse(init.body).webhookUrl }), { status: 200 });
+    }
+    const rota = u.pathname.split('/').pop();
+    const after = u.searchParams.get('after');
+    const mine = relay.filter((e) => e.rota === rota);
+    if (after === null) {
+      return new Response(JSON.stringify({ eventos: [], cursor: mine.length ? mine[mine.length - 1].id : 0 }));
+    }
+    const eventos = mine.filter((e) => e.id > Number(after)).map(({ id, corpo, assinatura }) => ({ id, corpo, assinatura }));
+    return new Response(JSON.stringify({ eventos, cursor: eventos.length ? eventos[eventos.length - 1].id : Number(after) }));
+  };
+  return { fetch, calls, post };
+}
+
+function pixggDonation(event, id, amount, extra = {}) {
+  return {
+    event,
+    timestamp: new Date().toISOString(),
+    data: {
+      transactionPublicId: id,
+      streamerUsername: 'Asrus',
+      donatorUsername: 'Doador',
+      message: 'Doação de testes',
+      audioLink: 'https://example.com/a.mp3',
+      totalAmount: amount,
+      status: event === 'donation.paid' ? 'paid' : 'pending',
+      ...extra,
+    },
+  };
+}
+
+test('PixGG: cadastra o webhook no repasse e entrega só doações pagas com assinatura válida', async (t) => {
+  const { PixggSource, pixggRoute } = require('../src/main/donations/sources');
+  const secret = 'segredo-do-pixgg';
+  const px = fakePixgg({ secret });
+  const src = new PixggSource({
+    clientId: 'app_123',
+    clientSecret: secret,
+    fetch: px.fetch,
+    apiBase: 'https://pixgg.test',
+    relayBase: 'https://relay.test/api/pixgg/relay/',
+    intervalMs: 20,
+  });
+  t.after(() => src.stop());
+  const rota = pixggRoute(secret);
+  assert.match(rota, /^[a-f0-9]{64}$/);
+  assert.equal(pixggRoute(secret), rota, 'a rota é estável entre aberturas');
+
+  // Doação de antes de abrir o app: não pode disparar.
+  px.post(rota, pixggDonation('donation.paid', 'trn_old', 50));
+
+  const online = waitFor(src, 'status', (s) => s === 'online');
+  src.start();
+  await online;
+  const reg = px.calls[0];
+  assert.equal(reg.url.pathname, '/Applications/set-webhook-url');
+  assert.equal(reg.init.headers['X-Client-Id'], 'app_123');
+  assert.equal(reg.init.headers['X-Client-Secret'], secret);
+  assert.equal(JSON.parse(reg.init.body).webhookUrl, `https://relay.test/api/pixgg/relay/${rota}`);
+
+  const got = [];
+  const logs = [];
+  src.on('donation', (d) => got.push(d));
+  src.on('log', (m) => logs.push(m));
+  px.post(rota, pixggDonation('donation.created', 'trn_1', 10)); // Pix gerado, não pago
+  px.post(rota, pixggDonation('donation.paid', 'trn_forjada', 999), { sign: 'outro-segredo' });
+  px.post(rota, pixggDonation('donation.paid', 'trn_1', 10));
+  px.post('f'.repeat(64), pixggDonation('donation.paid', 'trn_de_outra_rota', 5));
+  await waitFor(src, 'donation');
+  await new Promise((r) => setTimeout(r, 60));
+
+  assert.deepEqual(got.map((d) => [d.id, d.user, d.amount, d.currency, d.message]), [
+    ['trn_1', 'Doador', 10, 'BRL', 'Doação de testes'],
+  ]);
+  assert.ok(logs.some((m) => /assinatura inválida/.test(m)));
+  assert.equal(px.calls.filter((c) => c.url.pathname.endsWith('set-webhook-url')).length, 1, 'cadastra uma vez só');
+});
+
+test('PixGG: credencial recusada vira erro e para', async (t) => {
+  const { PixggSource } = require('../src/main/donations/sources');
+  const px = fakePixgg({ secret: 's', rejectCreds: true });
+  const src = new PixggSource({ clientId: 'x', clientSecret: 's', fetch: px.fetch, intervalMs: 10 });
+  t.after(() => src.stop());
+  const err = waitFor(src, 'status', (s) => s === 'error');
+  src.start();
+  const [, detail] = await err;
+  assert.match(detail, /PixGG recusou/);
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(px.calls.length, 1);
+});

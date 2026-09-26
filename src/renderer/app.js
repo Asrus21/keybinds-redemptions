@@ -313,6 +313,7 @@ const SOURCE_OPTIONS = [
   ['streamelements', 'StreamElements'],
   ['streamlabs', 'Streamlabs'],
   ['livepix', 'LivePix'],
+  ['pixgg', 'PixGG'],
 ];
 // Rótulos da faixa de valor de cada gatilho: [antes do mínimo, unidade].
 const RANGE_LABELS = {
