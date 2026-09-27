@@ -202,6 +202,8 @@ function ipcApi() {
     // Fecha, instala em silêncio e abre de novo (o before-quit solta as teclas).
     installUpdate: () => controller.installUpdate(),
     openExternal: (url) => openExternal(url),
+    // Abre %APPDATA%\Keybinds Redemptions no explorador (regras e backups).
+    openDataFolder: () => shell.openPath(app.getPath('userData')),
   };
 }
 
