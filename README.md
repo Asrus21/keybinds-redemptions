@@ -28,11 +28,17 @@ O executável não tem assinatura digital. Por isso, na primeira vez, o Windows 
 
 ## Primeira configuração (uma vez só)
 
-### 1. Crie um app na Twitch
+### 1. Entre com a Twitch
 
-O app precisa de um **Client ID** seu. É de graça e leva um minuto:
+1. Abra o app e clique em **Entrar com a Twitch**. O navegador abre em `twitch.tv/activate` com um código.
+2. Confira se o código é o mesmo que aparece no app e clique em **Autorizar**.
 
-O console da Twitch é em inglês; os nomes dos campos estão como aparecem lá.
+O instalador oficial já vem com o Client ID do app da Twitch (campo `twitchClientId` no `package.json`), então não precisa criar nada no dev.twitch.tv. Cada streamer entra com a própria conta e recebe só os eventos do próprio canal.
+
+<details>
+<summary>Usar um app da Twitch seu (opcional)</summary>
+
+Útil se você compila o app por conta própria com o `twitchClientId` vazio, ou se prefere não depender do app oficial. O console da Twitch é em inglês; os nomes dos campos estão como aparecem lá.
 
 1. Entre em [dev.twitch.tv/console/apps](https://dev.twitch.tv/console/apps/create) (**Register Your Application**).
 2. **Name**: qualquer um (ex.: `keybinds-do-fulano`).
@@ -40,18 +46,15 @@ O console da Twitch é em inglês; os nomes dos campos estão como aparecem lá.
 4. **Category**: *Broadcaster Suite*.
 5. **Client Type**: **Public**. Isso é importante: com *Confidential* o app não consegue renovar a sessão sozinho.
 6. Clique em **Create**, depois em **Manage**, e copie o **Client ID**.
+7. No app, clique em **trocar** ao lado do Client ID (com a conta desconectada), cole o seu e clique em **Salvar**.
 
-### 2. Entre com a Twitch
-
-1. Abra o app, cole o Client ID e clique em **Salvar**.
-2. Clique em **Entrar com a Twitch**. O navegador abre em `twitch.tv/activate` com um código.
-3. Confira se o código é o mesmo que aparece no app e clique em **Autorizar**.
+</details>
 
 O app só pede permissões de leitura: `channel:read:redemptions` (resgates e lista de recompensas), `bits:read` (bits) e `channel:read:subscriptions` (subs e gift subs). Ele não consegue mexer em nada no seu canal.
 
 Quem usava a versão anterior (só recompensas) precisa **entrar de novo uma vez** para liberar bits e subs; o app avisa.
 
-### 3. (Opcional) Conecte o serviço de doação
+### 2. (Opcional) Conecte o serviço de doação
 
 Só precisa se for usar regras de **Doação**. No cartão **Doações**, abra o serviço, cole o token e clique em **Conectar**:
 
@@ -76,7 +79,7 @@ Se o PixGG recusar o cadastro automático (em algumas contas a API responde `403
 
 Como o app troca a URL de webhook da aplicação, use uma aplicação do PixGG **só para ele**. Só doação paga (`donation.paid`) aperta tecla; Pix gerado e não pago é ignorado.
 
-### 4. Crie as regras
+### 3. Crie as regras
 
 1. Clique em **+ Nova regra**.
 2. Escolha o tipo de evento:
