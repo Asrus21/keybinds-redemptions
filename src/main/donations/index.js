@@ -65,6 +65,8 @@ class DonationHub extends EventEmitter {
         configured: !!(configured && configured[name]),
         state: source ? source.state : 'offline',
         detail: source ? source.detail : '',
+        // Só o PixGG tem: a URL de repasse, para cadastrar à mão.
+        webhookUrl: (source && source.webhookUrl) || '',
       };
     });
   }

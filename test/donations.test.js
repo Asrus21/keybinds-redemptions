@@ -322,32 +322,52 @@ test('PixGG: cadastra o webhook no repasse e entrega só doações pagas com ass
   assert.equal(px.calls.filter((c) => c.url.pathname.endsWith('set-webhook-url')).length, 1, 'cadastra uma vez só');
 });
 
-test('PixGG: credencial recusada vira erro e para', async (t) => {
-  const { PixggSource } = require('../src/main/donations/sources');
-  const px = fakePixgg({ secret: 's', rejectCreds: true });
-  const src = new PixggSource({ clientId: 'x', clientSecret: 's', fetch: px.fetch, intervalMs: 10 });
+test('PixGG: cadastro automático recusado (403) não para — mostra a URL para cadastrar à mão', async (t) => {
+  const { PixggSource, pixggRoute } = require('../src/main/donations/sources');
+  const secret = 's3cr3t';
+  const px = fakePixgg({ secret, rejectCreds: true });
+  const src = new PixggSource({
+    clientId: 'x',
+    clientSecret: secret,
+    fetch: px.fetch,
+    apiBase: 'https://pixgg.test',
+    relayBase: 'https://relay.test/api/pixgg/relay/',
+    intervalMs: 10,
+  });
   t.after(() => src.stop());
-  const err = waitFor(src, 'status', (s) => s === 'error');
+  const logs = [];
+  src.on('log', (m) => logs.push(m));
+  const online = waitFor(src, 'status', (s, d) => s === 'online' && /cole em pixgg\.com/.test(d));
   src.start();
-  const [, detail] = await err;
-  assert.match(detail, /PixGG recusou/);
-  assert.match(detail, /HTTP 401/, 'o código da resposta aparece no aviso');
-  await new Promise((r) => setTimeout(r, 40));
-  assert.equal(px.calls.length, 1);
+  await online;
+  assert.equal(src.webhookUrl, `https://relay.test/api/pixgg/relay/${pixggRoute(secret)}`);
+  assert.ok(logs.some((m) => /HTTP 401/.test(m)), 'o código da resposta aparece no registro');
+
+  // Segue escutando o repasse: uma doação assinada chega normalmente.
+  const got = waitFor(src, 'donation');
+  px.post(pixggRoute(secret), pixggDonation('donation.paid', 'trn_manual', 7));
+  const [d] = await got;
+  assert.equal(d.amount, 7);
+  assert.equal(px.calls.filter((c) => c.url.pathname.endsWith('set-webhook-url')).length, 1, 'não insiste no cadastro');
 });
 
-test('PixGG: 403 mostra o texto da resposta (pode ser permissão ou bloqueio do site)', async (t) => {
+test('PixGG: 403 do gateway leva o texto da resposta para o registro e manda User-Agent', async (t) => {
   const { PixggSource } = require('../src/main/donations/sources');
   const seen = [];
-  const fetch = async (url, init) => {
-    seen.push(init.headers);
-    return new Response('<html>Access denied | Cloudflare</html>', { status: 403 });
+  const fetch = async (url, init = {}) => {
+    if (String(url).includes('set-webhook-url')) {
+      seen.push(init.headers);
+      return new Response('{"message":"Forbidden"}', { status: 403 });
+    }
+    return new Response(JSON.stringify({ eventos: [], cursor: 0 }));
   };
   const src = new PixggSource({ clientId: 'x', clientSecret: 's', fetch, intervalMs: 10 });
   t.after(() => src.stop());
-  const err = waitFor(src, 'status', (s) => s === 'error');
+  const logs = [];
+  src.on('log', (m) => logs.push(m));
+  const online = waitFor(src, 'status', (s) => s === 'online');
   src.start();
-  const [, detail] = await err;
-  assert.match(detail, /negou o acesso \(HTTP 403 — <html>Access denied \| Cloudflare<\/html>\)/);
+  await online;
+  assert.ok(logs.some((m) => m.includes('HTTP 403 — {"message":"Forbidden"}')), logs.join('\n'));
   assert.match(seen[0]['User-Agent'], /KeybindsRedemptions/);
 });

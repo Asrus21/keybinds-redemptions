@@ -72,6 +72,8 @@ A LivePix não tem conexão em tempo real aberta: o app consulta as doações no
 2. O asrus.app guarda o aviso por até 24 h, sem abrir.
 3. O app busca os avisos novos a cada 3 segundos e confere a assinatura de cada um com o seu Client Secret. Aviso com assinatura errada é descartado.
 
+Se o PixGG recusar o cadastro automático (em algumas contas a API responde `403 Forbidden`), o app continua escutando e mostra a URL no cartão com um botão **Copiar**. Cole essa URL em pixgg.com → Aplicações → sua aplicação → URL de webhook. A URL depende do Client Secret: gerou um secret novo, cole a URL nova.
+
 Como o app troca a URL de webhook da aplicação, use uma aplicação do PixGG **só para ele**. Só doação paga (`donation.paid`) aperta tecla; Pix gerado e não pago é ignorado.
 
 ### 4. Crie as regras
