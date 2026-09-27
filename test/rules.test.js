@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { normalizeRule, patchRule, matchRules, describeTrigger } = require('../src/main/rules');
+const { normalizeRule, patchRule, matchRules, describeTrigger, isRunnable } = require('../src/main/rules');
 
 function rule(fields) {
   return normalizeRule({ keys: ['KeyG'], ...fields });
@@ -78,4 +78,40 @@ test('descrição curta do gatilho (vai para o registro do "Testar")', () => {
   assert.equal(describeTrigger(rule({ trigger: 'sub', tier: '2000' })), 'Sub (Tier 2)');
   assert.match(describeTrigger(rule({ trigger: 'donation', min: 10 })), /^Doação: 10,00 ou mais \(qualquer serviço\)$/);
   assert.equal(describeTrigger(rule({ trigger: 'reward', rewardTitle: 'Pular' })), 'Pular');
+});
+
+test('comando do chat: primeira palavra, sem maiúscula e com nível mínimo', () => {
+  const mk = (o) => normalizeRule({ enabled: true, keys: ['KeyG'], trigger: 'command', ...o });
+  // O campo guarda só a primeira palavra, em minúsculas.
+  assert.equal(mk({ command: '  !SOM  alto ' }).command, '!som');
+  assert.equal(mk({ command: '' }).command, '');
+  assert.equal(mk({}).who, 'all', 'padrão é todo mundo');
+  assert.equal(mk({ who: 'inventado' }).who, 'all');
+
+  // Sem comando a regra não roda, mesmo com tecla escolhida.
+  assert.equal(isRunnable(mk({ command: '' })), false);
+  assert.equal(isRunnable(mk({ command: '!som' })), true);
+
+  const rules = [mk({ command: '!som', who: 'all' }), mk({ command: '!clip', who: 'mod' })];
+  const hit = (command, level) => matchRules(rules, { kind: 'command', command, level }).map((r) => r.command);
+  assert.deepEqual(hit('!som', 0), ['!som']);
+  assert.deepEqual(hit('!clip', 0), [], 'viewer não usa comando de mod');
+  assert.deepEqual(hit('!clip', 2), [], 'VIP ainda não é mod');
+  assert.deepEqual(hit('!clip', 3), ['!clip']);
+  assert.deepEqual(hit('!outro', 3), []);
+
+  // A escada: quem está acima também pode.
+  const soSub = [mk({ command: '!x', who: 'sub' })];
+  assert.equal(matchRules(soSub, { kind: 'command', command: '!x', level: 0 }).length, 0);
+  for (const level of [1, 2, 3]) {
+    assert.equal(matchRules(soSub, { kind: 'command', command: '!x', level }).length, 1, `nível ${level}`);
+  }
+});
+
+test('trocar para comando e voltar não deixa lixo na faixa', () => {
+  const bits = normalizeRule({ trigger: 'bits', min: 500, keys: ['KeyG'] });
+  const cmd = patchRule(bits, { trigger: 'command' });
+  assert.equal(cmd.min, 0, 'faixa de bits não vale para comando');
+  const back = patchRule(cmd, { trigger: 'bits' });
+  assert.equal(back.min, 100, 'volta para o padrão de bits');
 });

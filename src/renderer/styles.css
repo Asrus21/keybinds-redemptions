@@ -33,6 +33,7 @@
   --t-sub: #9fbb84;
   --t-gift: #cf907a;
   --t-donation: #8eaacb;
+  --t-command: #c49ab8;
 
   --font: 'Segoe UI Variable Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --mono: 'Cascadia Mono', 'Cascadia Code', Consolas, ui-monospace, monospace;
@@ -253,6 +254,7 @@ input::placeholder { color: var(--muted); }
 .rule[data-trigger='sub'] { --t: var(--t-sub); }
 .rule[data-trigger='gift'] { --t: var(--t-gift); }
 .rule[data-trigger='donation'] { --t: var(--t-donation); }
+.rule[data-trigger='command'] { --t: var(--t-command); }
 .rule.off { opacity: 0.5; }
 .rule.flash { background: rgba(255, 255, 255, 0.08); }
 .rule-main { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto minmax(130px, auto); align-items: center; gap: 10px; }
@@ -378,6 +380,7 @@ kbd {
 .log li[data-trigger='sub'] .what .reward { color: var(--t-sub); }
 .log li[data-trigger='gift'] .what .reward { color: var(--t-gift); }
 .log li[data-trigger='donation'] .what .reward { color: var(--t-donation); }
+.log li[data-trigger='command'] .what .reward { color: var(--t-command); }
 .log li.info .what { color: var(--text-2); }
 .log li.error .what { color: var(--bad); }
 .log .via { font-size: 11.5px; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; }
@@ -507,3 +510,8 @@ dialog > * + * { margin-top: 12px; }
   margin-left: 6px;
   vertical-align: 1px;
 }
+
+/* ---------- comando do chat ---------- */
+.command-pick { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.input.command { flex: 1 1 120px; min-width: 80px; padding: 7px 10px; }
+.select.who { width: auto; flex: 0 0 auto; min-width: 104px; }

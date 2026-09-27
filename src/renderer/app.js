@@ -290,6 +290,7 @@ function searchTextOf(rule) {
     rule.rewardTitle,
     rule.trigger === 'sub' ? label(TIER_OPTIONS, rule.tier) : '',
     rule.trigger === 'donation' ? label(SOURCE_OPTIONS, rule.source) : '',
+    rule.trigger === 'command' ? `${rule.command} ${label(WHO_OPTIONS, rule.who)}` : '',
     ...rule.keys.map(labelOf),
     rule.min || '',
     rule.max || '',
@@ -352,6 +353,13 @@ const TRIGGER_OPTIONS = [
   ['sub', 'Sub'],
   ['gift', 'Gift sub'],
   ['donation', 'Doação'],
+  ['command', 'Comando'],
+];
+const WHO_OPTIONS = [
+  ['all', 'de todos'],
+  ['sub', 'de subs'],
+  ['vip', 'de VIPs'],
+  ['mod', 'de mods'],
 ];
 const TIER_OPTIONS = [
   ['any', 'Qualquer tier'],
@@ -414,10 +422,26 @@ function createRuleRow(id) {
   const source = h('select', { class: 'select', 'aria-label': 'Serviço de doação' }, optionsOf(SOURCE_OPTIONS));
   source.addEventListener('change', () => act('updateRule', id, { source: source.value }));
 
+  // Comando do chat
+  const command = h('input', {
+    class: 'input mono command',
+    placeholder: '!som',
+    'aria-label': 'Comando do chat',
+    maxlength: 30,
+    autocomplete: 'off',
+    spellcheck: 'false',
+  });
+  const saveCommand = () => act('updateRule', id, { command: command.value });
+  command.addEventListener('change', saveCommand);
+  command.addEventListener('keydown', (e) => e.key === 'Enter' && command.blur());
+  const who = h('select', { class: 'select who', 'aria-label': 'Quem pode usar o comando' }, optionsOf(WHO_OPTIONS));
+  who.addEventListener('change', () => act('updateRule', id, { who: who.value }));
+  const commandWrap = h('span', { class: 'command-pick' }, command, who);
+
   // Bits, gift e doação
   const range = rangeField(id);
 
-  const detail = h('div', { class: 'trigger-detail' }, rewardWrap, tier, source, range.wrap);
+  const detail = h('div', { class: 'trigger-detail' }, rewardWrap, tier, source, commandWrap, range.wrap);
 
   const keysBtn = h('button', { class: 'keys-btn', type: 'button', title: 'Escolher a tecla', onclick: () => openKeyDialog(id) });
 
@@ -461,6 +485,9 @@ function createRuleRow(id) {
     rewardWrap,
     tier,
     source,
+    command,
+    who,
+    commandWrap,
     range,
     keysBtn,
     hold,
@@ -487,11 +514,14 @@ function updateRuleRow(els, rule) {
   els.rewardWrap.hidden = t !== 'reward';
   els.tier.hidden = t !== 'sub';
   els.source.hidden = t !== 'donation';
+  els.commandWrap.hidden = t !== 'command';
   els.range.wrap.hidden = !RANGE_LABELS[t];
 
   if (t === 'reward') updateRewardPick(els, rule);
   setIfIdle(els.tier, rule.tier);
   setIfIdle(els.source, rule.source);
+  setIfIdle(els.command, rule.command);
+  setIfIdle(els.who, rule.who);
   if (RANGE_LABELS[t]) {
     const [lead, unit] = RANGE_LABELS[t];
     els.range.lead.textContent = lead;
@@ -517,7 +547,11 @@ function updateRuleRow(els, rule) {
   // Intervalo só faz sentido quando repete.
   els.gap.wrap.hidden = rule.repeat <= 1;
 
-  const missing = [t === 'reward' && !rule.rewardId && 'a recompensa', !rule.keys.length && 'a tecla'].filter(Boolean);
+  const missing = [
+    t === 'reward' && !rule.rewardId && 'a recompensa',
+    t === 'command' && !rule.command && 'o comando',
+    !rule.keys.length && 'a tecla',
+  ].filter(Boolean);
   els.warn.textContent = missing.length ? `Falta escolher ${missing.join(' e ')}.` : '';
   if (!els.testing) els.test.disabled = !rule.keys.length;
 }

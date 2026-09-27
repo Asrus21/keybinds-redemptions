@@ -47,7 +47,13 @@ const TWITCH_EVENTS = [
   { type: 'channel.subscribe', version: '1', label: 'subs' },
   { type: 'channel.subscription.message', version: '1', label: 'renovações de sub' },
   { type: 'channel.subscription.gift', version: '1', label: 'gift subs' },
+  // O chat precisa dizer quem está lendo, e quem lê é a própria conta.
+  { type: 'channel.chat.message', version: '1', label: 'mensagens do chat', self: true },
 ];
+
+// Selos que dão nível a quem escreveu. O dono do canal entra como mod: é o
+// nível mais alto que as regras oferecem.
+const BADGE_LEVEL = { broadcaster: 3, moderator: 3, vip: 2, subscriber: 1, founder: 1 };
 const LOG_SIZE = 200;
 const VALIDATE_EVERY_MS = 60 * 60 * 1000;
 const RETRY_OFFLINE_MS = 30 * 1000;
@@ -315,8 +321,10 @@ class Controller extends EventEmitter {
         throw new SessionExpiredError('O Client ID mudou. Entre de novo com a Twitch.');
       }
       if (!SCOPES.every((s) => info.scopes.includes(s))) {
+        // Versão nova pedindo escopo novo (o chat, por exemplo): o token
+        // velho não serve, e só entrar de novo resolve.
         throw new SessionExpiredError(
-          'O app precisa de mais permissões da Twitch (para bits e subs). Entre de novo com a Twitch.'
+          'O app precisa de mais permissões da Twitch (bits, subs e chat). Entre de novo com a Twitch.'
         );
       }
       this.account = await this.api.getSelf();
@@ -501,7 +509,13 @@ class Controller extends EventEmitter {
   async subscribeAll(sessionId) {
     for (const ev of TWITCH_EVENTS) {
       try {
-        await this.api.subscribeEvent(ev.type, ev.version, sessionId, this.account.id);
+        await this.api.subscribeEvent(
+          ev.type,
+          ev.version,
+          sessionId,
+          this.account.id,
+          ev.self ? { user_id: this.account.id } : undefined
+        );
       } catch (err) {
         if (err instanceof SessionExpiredError) err.fatal = true;
         // 400/403: recusado de vez (escopo, canal…). Tentar de novo não muda.
@@ -564,6 +578,24 @@ class Controller extends EventEmitter {
           action: 'renovou',
           target: `${TIER_LABELS[e.tier] || 'sub'} · ${e.cumulative_months || '?'} meses`,
         });
+      case 'channel.chat.message': {
+        const text = (e.message && e.message.text) || '';
+        const command = text.trim().toLowerCase().split(/\s+/)[0];
+        if (!command) return undefined;
+        // O nível vem dos selos, não do texto: ninguém vira mod escrevendo.
+        const level = (e.badges || []).reduce(
+          (top, b) => Math.max(top, BADGE_LEVEL[b && b.set_id] || 0),
+          0
+        );
+        return this.dispatch({
+          kind: 'command',
+          command,
+          level,
+          user: e.chatter_user_name || e.chatter_user_login || 'Alguém',
+          action: 'digitou',
+          target: command,
+        });
+      }
       case 'channel.subscription.gift': {
         const total = Number(e.total) || 0;
         return this.dispatch({

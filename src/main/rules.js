@@ -10,11 +10,19 @@
 //   sub      — sub nova ou renovada (tier: any | 1000 | 2000 | 3000)
 //   gift     — alguém deu X subs de presente ou mais (min/max)
 //   donation — doação de X ou mais (min/max), de um serviço ou de qualquer um
+//   command  — alguém digitou um comando no chat (!som), com um nível mínimo
+//              de quem pode usar
 
 const crypto = require('node:crypto');
 const { normalizeCombo } = require('../shared/keys');
 
-const TRIGGERS = ['reward', 'bits', 'sub', 'gift', 'donation'];
+const TRIGGERS = ['reward', 'bits', 'sub', 'gift', 'donation', 'command'];
+// Quem pode usar um comando do chat. É uma escada: quem está acima também
+// pode. VIP não é "mais" que sub na Twitch, mas como escolha de "nível
+// mínimo" é o que o streamer espera de um menu com essas quatro opções.
+const CHATTERS = ['all', 'sub', 'vip', 'mod'];
+const CHATTER_LEVEL = { all: 0, sub: 1, vip: 2, mod: 3 };
+const COMMAND_MAX = 30;
 const TIERS = ['any', '1000', '2000', '3000'];
 const DONATION_SOURCES = ['any', 'streamelements', 'streamlabs', 'livepix', 'pixgg'];
 
@@ -63,6 +71,15 @@ function cleanText(value, max) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
 
+/**
+ * Um comando é sempre a PRIMEIRA palavra da mensagem, em minúsculas. Se o
+ * streamer digitar "!som alto" no campo, guardamos "!som": o resto da
+ * mensagem é assunto de quem escreveu, não parte do comando.
+ */
+function cleanCommand(value) {
+  return cleanText(value, COMMAND_MAX).toLowerCase().split(/\s+/)[0] || '';
+}
+
 /** Regra nova, de recompensa, sem recompensa e sem tecla — a tela preenche. */
 function newRule() {
   return normalizeRule({ id: crypto.randomUUID(), enabled: true });
@@ -86,6 +103,8 @@ function normalizeRule(raw) {
     max,
     tier: TIERS.includes(r.tier) ? r.tier : 'any',
     source: DONATION_SOURCES.includes(r.source) ? r.source : 'any',
+    command: cleanCommand(r.command),
+    who: CHATTERS.includes(r.who) ? r.who : 'all',
     keys: normalizeCombo(r.keys),
     holdMs: clampInt(r.holdMs, LIMITS.holdMs),
     repeat: clampInt(r.repeat, LIMITS.repeat),
@@ -98,7 +117,7 @@ function patchRule(rule, patch) {
   const p = patch && typeof patch === 'object' ? patch : {};
   const editable = [
     'enabled', 'trigger', 'rewardId', 'rewardTitle', 'min', 'max', 'tier', 'source',
-    'keys', 'holdMs', 'repeat', 'gapMs',
+    'command', 'who', 'keys', 'holdMs', 'repeat', 'gapMs',
   ];
   const next = { ...rule };
   for (const field of editable) {
@@ -116,7 +135,9 @@ function patchRule(rule, patch) {
 /** Uma regra só dispara se estiver ligada e completa. */
 function isRunnable(rule) {
   if (!rule.enabled || rule.keys.length === 0) return false;
-  return rule.trigger !== 'reward' || rule.rewardId !== '';
+  if (rule.trigger === 'reward') return rule.rewardId !== '';
+  if (rule.trigger === 'command') return rule.command !== '';
+  return true;
 }
 
 /**
@@ -133,6 +154,10 @@ function isRunnable(rule) {
 function matchRules(rules, event) {
   const candidates = rules.filter((r) => r.trigger === event.kind && isRunnable(r));
   if (event.kind === 'reward') return candidates.filter((r) => r.rewardId === event.rewardId);
+  if (event.kind === 'command') {
+    const level = Number(event.level) || 0;
+    return candidates.filter((r) => r.command === event.command && CHATTER_LEVEL[r.who] <= level);
+  }
   if (event.kind === 'sub') return candidates.filter((r) => r.tier === 'any' || r.tier === event.tier);
 
   const amount = Number(event.amount);
@@ -149,6 +174,7 @@ function matchRules(rules, event) {
 }
 
 const TIER_LABELS = { any: 'qualquer tier', 1000: 'Tier 1', 2000: 'Tier 2', 3000: 'Tier 3' };
+const WHO_LABELS = { all: 'todos', sub: 'subs', vip: 'VIPs', mod: 'mods' };
 const SOURCE_LABELS = {
   any: 'qualquer serviço',
   streamelements: 'StreamElements',
@@ -183,6 +209,8 @@ function describeTrigger(rule) {
       return `Gift sub: ${rangeText(rule, rule.min === 1 && !rule.max ? 'sub' : 'subs')}`;
     case 'donation':
       return `Doação: ${rangeText(rule)} (${SOURCE_LABELS[rule.source]})`;
+    case 'command':
+      return `Comando ${rule.command || '(sem comando)'} (${WHO_LABELS[rule.who]})`;
     default:
       return rule.rewardTitle || 'Recompensa';
   }
@@ -195,6 +223,9 @@ function actionOf(rule) {
 module.exports = {
   TRIGGERS,
   TIERS,
+  CHATTERS,
+  CHATTER_LEVEL,
+  WHO_LABELS,
   DONATION_SOURCES,
   LIMITS,
   AMOUNT,

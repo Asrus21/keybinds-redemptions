@@ -186,8 +186,12 @@ test('fluxo completo: login, regra, resgate aperta a tecla, pausa, sessão salva
       'channel.subscribe',
       'channel.subscription.message',
       'channel.subscription.gift',
+      'channel.chat.message',
     ]
   );
+  // O chat é o único evento que também diz quem está lendo.
+  assert.deepEqual(subs[0].condition, { broadcaster_user_id: '42' });
+  assert.deepEqual(subs.at(-1).condition, { broadcaster_user_id: '42', user_id: '42' });
   const subBody = subs[0];
   assert.deepEqual(subBody.transport, { method: 'websocket', session_id: 'sess-1' });
   assert.deepEqual(subBody.condition, { broadcaster_user_id: '42' });
@@ -400,7 +404,7 @@ test('Twitch recusa bits/subs (403): resgates seguem funcionando, com aviso', as
   conn.send('session_welcome', { session: { id: 'sess', keepalive_timeout_seconds: 10 } });
   await waitUntil(() => ctrl.snapshot().connection === 'online');
   const errors = ctrl.getLog().filter((e) => e.kind === 'error').map((e) => e.text);
-  assert.equal(errors.length, 4);
+  assert.equal(errors.length, 5);
   assert.match(errors.join('\n'), /bits: subscription missing proper authorization/);
 });
 
@@ -425,4 +429,69 @@ test('"Parar tudo" cancela o teste que ainda está na contagem e diz quantas par
   assert.ok(Date.now() - started < 1000, 'não esperou a contagem');
   assert.deepEqual(pressed, [], 'nenhuma tecla apertada');
   assert.ok(ctrl.getLog().some((e) => e.kind === 'test' && e.outcome === 'aborted'));
+});
+
+test('comando do chat aperta a tecla, respeitando os selos de quem digitou', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-ctrl-'));
+  const store = new Store({ dir });
+  store.saveConfig({ ...store.loadConfig(), clientId: CLIENT_ID });
+  const kb = createSimulatedKeyboard();
+  const ctrl = new Controller({
+    store,
+    keyboard: kb,
+    fetch: fakeTwitch().fetch,
+    testDelayMs: 0,
+  });
+  t.after(() => ctrl.dispose());
+  ctrl.load();
+
+  const livre = ctrl.addRule();
+  ctrl.updateRule(livre.id, { trigger: 'command', command: '!som', who: 'all', keys: ['KeyS'], holdMs: 10 });
+  const soMod = ctrl.addRule();
+  ctrl.updateRule(soMod.id, { trigger: 'command', command: '!clip', who: 'mod', keys: ['F13'], holdMs: 10 });
+
+  const chat = (text, badges = [], user = 'Viewer') =>
+    ctrl.handleTwitchEvent('channel.chat.message', {
+      chatter_user_name: user,
+      message: { text },
+      badges,
+    });
+
+  chat('!som');
+  chat('!SOM com texto depois'); // maiúscula e argumento continuam valendo
+  chat('oi gente'); // conversa normal não vira comando
+  chat('!clip'); // viewer não pode
+  chat('!clip', [{ set_id: 'vip', id: '1' }]); // VIP ainda não é mod
+  chat('!clip', [{ set_id: 'moderator', id: '1' }], 'Mod');
+  chat('!clip', [{ set_id: 'broadcaster', id: '1' }], 'Dono');
+
+  await waitUntil(() => ctrl.runner.pending === 0);
+
+  const apertadas = kb.events.filter(([dir]) => dir === 'down').map(([, code]) => code);
+  assert.deepEqual(apertadas, ['KeyS', 'KeyS', 'F13', 'F13']);
+
+  const log = ctrl.getLog().filter((e) => e.kind === 'event');
+  assert.equal(log.filter((e) => e.outcome === 'ignored').length, 3, 'conversa e os dois !clip negados');
+  assert.equal(log[0].user, 'Dono');
+  assert.equal(log[0].trigger, 'command');
+});
+
+test('selo não conhecido não dá poder nenhum', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-ctrl-'));
+  const store = new Store({ dir });
+  const ctrl = new Controller({ store, keyboard: createSimulatedKeyboard(), fetch: fakeTwitch().fetch });
+  t.after(() => ctrl.dispose());
+  ctrl.load();
+  const r = ctrl.addRule();
+  ctrl.updateRule(r.id, { trigger: 'command', command: '!x', who: 'mod', keys: ['KeyX'], holdMs: 10 });
+
+  // Nome parecido com mod, e um selo inventado: nenhum dos dois conta.
+  ctrl.handleTwitchEvent('channel.chat.message', {
+    chatter_user_name: 'moderator',
+    message: { text: '!x' },
+    badges: [{ set_id: 'glitchcon2020', id: '1' }, { set_id: 'moderatorzinho', id: '1' }],
+  });
+  await waitUntil(() => ctrl.runner.pending === 0);
+  assert.deepEqual(ctrl.snapshot().rules.length, 1);
+  assert.equal(ctrl.getLog()[0].outcome, 'ignored');
 });
