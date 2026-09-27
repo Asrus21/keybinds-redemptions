@@ -1,12 +1,12 @@
 {
   "name": "keybinds-redemptions",
   "productName": "Keybinds Redemptions",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Aperta uma tecla no PC do streamer em resgates, bits, subs, gift subs e doações da live.",
   "author": "Thiago Arruda <tarruda1513@gmail.com>",
   "private": true,
   "main": "src/main/main.js",
-  "twitchClientId": "",
+  "twitchClientId": "zq9854i4gj8u5nb21dz8vsartoyj6k",
   "scripts": {
     "start": "electron .",
     "test": "node --test \"test/*.test.js\"",
