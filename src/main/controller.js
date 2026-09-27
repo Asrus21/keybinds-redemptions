@@ -135,6 +135,9 @@ class Controller extends EventEmitter {
       });
     }
     this.pendingTests = new Set(); // "Testar" ainda na contagem
+    // Última vez que cada regra disparou, para o tempo de espera. A chave é o
+    // id da regra, ou id + nick quando a espera é por pessoa.
+    this.cooldowns = new Map();
 
     // Troca automática de perfil pelo programa em foco (só no Windows).
     this.foreground = foreground || null;
@@ -628,6 +631,30 @@ class Controller extends EventEmitter {
     });
   }
 
+  cooldownKey(rule, user) {
+    return rule.cooldownPerUser ? `${rule.id}\n${String(user || '').toLowerCase()}` : rule.id;
+  }
+
+  /** Quanto falta (ms) para a regra poder disparar de novo. 0 = pode agora. */
+  cooldownLeft(rule, user, now = Date.now()) {
+    if (!rule.cooldownMs) return 0;
+    const last = this.cooldowns.get(this.cooldownKey(rule, user));
+    return last === undefined ? 0 : Math.max(0, rule.cooldownMs - (now - last));
+  }
+
+  /**
+   * Joga fora as esperas que já venceram. Com espera por pessoa, o mapa cresce
+   * com o número de nicks diferentes da live, então não dá para deixar crescer
+   * sem fim.
+   */
+  pruneCooldowns(now) {
+    if (this.cooldowns.size <= 1000) return;
+    const maior = Math.max(0, ...this.rules.map((r) => r.cooldownMs));
+    for (const [key, at] of this.cooldowns) {
+      if (now - at > maior) this.cooldowns.delete(key);
+    }
+  }
+
   /** Acha as regras do evento e põe na fila (ou só registra, se pausado). */
   dispatch(ev) {
     const base = {
@@ -647,7 +674,27 @@ class Controller extends EventEmitter {
       this.addLog({ ...base, steps: rules[0].steps, keys: keysOf(rules[0]), outcome: 'paused' });
       return;
     }
-    for (const rule of rules) this.run(rule, base);
+
+    const now = Date.now();
+    const prontas = rules.filter((r) => this.cooldownLeft(r, ev.user, now) === 0);
+    if (prontas.length === 0) {
+      // Todas esperando: o evento aparece no registro dizendo quanto falta,
+      // para o streamer entender por que a tecla não veio.
+      const falta = Math.min(...rules.map((r) => this.cooldownLeft(r, ev.user, now)));
+      this.addLog({
+        ...base,
+        steps: rules[0].steps,
+        keys: keysOf(rules[0]),
+        outcome: 'cooldown',
+        error: `Esperando ${Math.ceil(falta / 1000)} s${rules[0].cooldownPerUser ? ' para esta pessoa' : ''}.`,
+      });
+      return;
+    }
+    for (const rule of prontas) {
+      if (rule.cooldownMs) this.cooldowns.set(this.cooldownKey(rule, ev.user), now);
+      this.run(rule, base);
+    }
+    this.pruneCooldowns(now);
   }
 
   run(rule, logBase) {

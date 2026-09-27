@@ -257,9 +257,18 @@ input::placeholder { color: var(--muted); }
 .rule[data-trigger='command'] { --t: var(--t-command); }
 .rule.off { opacity: 0.5; }
 .rule.flash { background: rgba(255, 255, 255, 0.08); }
-.rule-main { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto minmax(130px, auto); align-items: center; gap: 10px; }
+/* A última coluna é o botão da sequência. `minmax(0, …)` nas duas colunas que
+   crescem é o que impede o conteúdo de vazar por cima do vizinho quando a
+   janela está na largura padrão. */
+.rule-main {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto minmax(0, max-content);
+  align-items: center;
+  gap: 10px;
+}
+.rule-main > .keys-btn { min-width: 104px; }
 .rule-main .arrow { color: var(--muted); font-size: 15px; }
-.rule-details { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+.rule-details { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
 .rule-details label { display: inline-flex; align-items: center; gap: 6px; }
 .rule-details input[type='number'] { width: 68px; padding: 4px 6px; color: var(--text); }
 .rule-details .spacer { flex: 1; }
@@ -453,12 +462,17 @@ dialog > * + * { margin-top: 12px; }
 
 /* ---------- gatilhos ---------- */
 .trigger-detail { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
-.trigger-detail > .select { flex: 1; min-width: 130px; }
+.trigger-detail > .select { flex: 1 1 110px; min-width: 0; }
 .trigger-detail > .select[aria-label='Serviço de doação'] { flex: 0 1 auto; min-width: 0; width: auto; }
 .reward-pick { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .reward-pick .select { flex: 1; min-width: 0; }
-.range { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; white-space: nowrap; }
-.range input.amount { width: 106px; padding: 6px 8px; font-size: 13px; color: var(--text); }
+/* Sem `nowrap`: apertado, a unidade ("bits") desce uma linha em vez de
+   passar por cima da seta. */
+.range { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; color: var(--muted); font-size: 13px; }
+/* Encolhe até caber ao lado do resto, mas nunca a ponto de cortar "sem
+   limite" nem um valor de quatro dígitos. Se não couber, o .trigger-detail
+   quebra a linha, que é melhor do que um campo ilegível. */
+.range input.amount { flex: 0 1 100px; min-width: 76px; padding: 6px 8px; font-size: 13px; color: var(--text); }
 
 /* ---------- doações ---------- */
 .sources { display: flex; flex-direction: column; gap: 8px; }
@@ -558,3 +572,7 @@ dialog > * + * { margin-top: 12px; }
   border-radius: 5px;
   padding: 1px 6px;
 }
+
+/* ---------- tempo de espera da regra ---------- */
+.rule-details .cooldown input { width: 58px; }
+.rule-details label input[type='checkbox'] { accent-color: var(--primary); margin-right: 2px; }
