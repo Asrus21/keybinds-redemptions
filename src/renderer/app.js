@@ -703,6 +703,22 @@ function sourceView(src) {
   );
   const children = [head];
   if (src.detail) children.push(h('p', { class: src.state === 'error' ? 'hint bad' : 'hint' }, src.detail));
+  if (src.webhookUrl) {
+    const url = h('input', { class: 'input mono', readonly: true, value: src.webhookUrl, 'aria-label': 'URL de webhook' });
+    url.addEventListener('focus', () => url.select());
+    const copy = h('button', { class: 'btn small', type: 'button' }, 'Copiar');
+    copy.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(src.webhookUrl);
+        copy.textContent = 'Copiado!';
+      } catch {
+        url.select();
+        copy.textContent = 'Ctrl+C para copiar';
+      }
+      setTimeout(() => (copy.textContent = 'Copiar'), 2000);
+    });
+    children.push(h('p', { class: 'hint small' }, 'URL de webhook desta conexão:'), h('div', { class: 'field-row' }, url, copy));
+  }
 
   const editing = openSources.has(src.name) || !src.configured;
   if (src.configured && !openSources.has(src.name)) {

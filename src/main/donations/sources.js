@@ -310,6 +310,9 @@ class PixggSource extends Source {
     this.fetch = fetch;
     this.apiBase = apiBase;
     this.relayUrl = relayBase + pixggRoute(clientSecret);
+    // A tela mostra esta URL para quem precisar cadastrá-la à mão no PixGG.
+    this.webhookUrl = this.relayUrl;
+    this.manual = ''; // motivo, quando o cadastro automático foi recusado
     this.intervalMs = intervalMs;
     this.cursor = null;
     this.registered = false;
@@ -340,18 +343,36 @@ class PixggSource extends Source {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'User-Agent': 'KeybindsRedemptions (+https://github.com/Asrus21/keybinds-redemptions)',
         'X-Client-Id': this.clientId,
         'X-Client-Secret': this.clientSecret,
       },
       body: JSON.stringify({ webhookUrl: this.relayUrl }),
     });
-    if (res.status === 401 || res.status === 403) {
-      const err = new Error('O PixGG recusou o Client ID/Client Secret.');
-      err.fatal = true;
-      throw err;
+    if (res.ok) {
+      this.registered = true;
+      return;
     }
-    if (!res.ok) throw new Error(`PixGG respondeu ${res.status} ao cadastrar o webhook.`);
-    this.registered = true;
+    // O texto da resposta vai junto no aviso: é o que diz se foi a
+    // credencial, a permissão da aplicação ou um bloqueio do site.
+    let body = '';
+    try {
+      body = (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 200);
+    } catch {}
+    const detail = `HTTP ${res.status}${body ? ` — ${body}` : ''}`;
+    if (res.status === 401 || res.status === 403) {
+      // A API do PixGG recusa essa rota em algumas contas (o gateway devolve
+      // 403 "Forbidden"), mas a URL também pode ser cadastrada à mão na aba
+      // Aplicações. Então não para: segue escutando o repasse e a tela mostra
+      // a URL para copiar. Se as credenciais estiverem erradas, os avisos
+      // chegam com assinatura inválida e aparecem na atividade.
+      this.registered = true;
+      this.manual = detail;
+      this.emit('log', `PixGG: o cadastro automático do webhook foi recusado (${detail}). Cadastre a URL à mão na aplicação do PixGG.`);
+      return;
+    }
+    throw new Error(`PixGG respondeu ao cadastrar o webhook: ${detail}.`);
   }
 
   async poll() {
@@ -396,7 +417,10 @@ class PixggSource extends Source {
       if (!this.registered) await this.register();
       await this.poll();
       if (!this.running) return;
-      if (this.state !== 'online') this.setStatus('online');
+      const detail = this.manual
+        ? 'Escutando. O PixGG não deixou o app cadastrar o webhook sozinho: copie a URL abaixo e cole em pixgg.com → Aplicações → sua aplicação → URL de webhook.'
+        : '';
+      if (this.state !== 'online' || this.detail !== detail) this.setStatus('online', detail);
       this.schedule();
     } catch (err) {
       if (err.fatal) {
