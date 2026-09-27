@@ -21,8 +21,8 @@ As teclas são enviadas como **scancode**, a mesma coisa que o teclado físico m
 
 Baixe o instalador na aba **Actions** do repositório (último run verde → artefato `keybinds-redemptions-windows`) ou em **Releases**, se houver uma.
 
-- `Keybinds Redemptions-Setup-x.y.z.exe`: instalador normal.
-- `Keybinds Redemptions-Portable-x.y.z.exe`: roda sem instalar.
+- `KeybindsRedemptions-Setup-x.y.z.exe`: instalador normal.
+- `KeybindsRedemptions-Portable-x.y.z.exe`: roda sem instalar.
 
 O executável não tem assinatura digital. Por isso, na primeira vez, o Windows SmartScreen avisa: clique em **Mais informações → Executar assim mesmo**.
 
@@ -100,6 +100,7 @@ Pontos de canal, bits e subs só existem em canais **Afiliados ou Parceiros**.
 - Os eventos entram numa **fila** e rodam um de cada vez, para dois “segura W” não se atropelarem.
 - Fechar a janela deixa o app rodando **na bandeja**, perto do relógio. Para sair de vez, clique com o botão direito no ícone e escolha **Sair**. Pausar e Parar tudo também estão nesse menu.
 - **Abrir junto com o Windows** já inicia o app na bandeja.
+- **Versão nova:** o app confere no GitHub ao abrir e a cada 6 horas. Quando sai uma versão nova, aparece um aviso no topo com o botão **Baixar**. Ele não atualiza sozinho: você instala quando quiser, fora da live.
 
 ### Dica para o OBS
 
@@ -122,6 +123,7 @@ As teclas **F13 a F24** não existem no teclado comum, então nenhum jogo usa. C
 
 - Os tokens da Twitch ficam em `%APPDATA%\Keybinds Redemptions\tokens.bin`, e os dos serviços de doação em `donations.bin`, **cifrados pelo Windows (DPAPI)**. Só o seu usuário do Windows consegue ler.
 - As regras e as preferências ficam em `config.json`, na mesma pasta.
+- Para saber se há versão nova, o app lê só o release mais recente em `api.github.com`, sem mandar dado nenhum.
 - O app só se comunica com a Twitch (`id.twitch.tv`, `api.twitch.tv` e `eventsub.wss.twitch.tv`) e com os serviços de doação que você conectar (`realtime.streamelements.com`, `sockets.streamlabs.com`, `oauth.livepix.gg`, `api.livepix.gg`, `app.pixgg.com` e o repasse em `asrus.app`). Ele não envia nada para nenhum outro lugar.
 - As mensagens que os viewers mandam (no resgate, no cheer ou na doação) são ignoradas. A tecla é escolhida só pelo tipo de evento e pelo valor, então ninguém do chat consegue fazer o app apertar outra coisa.
 

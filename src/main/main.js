@@ -196,6 +196,8 @@ function ipcApi() {
     connectDonation: (name, credentials) => controller.connectDonation(name, credentials),
     disconnectDonation: (name) => controller.disconnectDonation(name),
     dismissNotice: () => controller.setNotice(''),
+    dismissUpdate: () => controller.dismissUpdate(),
+    openUpdate: () => controller.update && openExternal(controller.update.url),
     openExternal: (url) => openExternal(url),
   };
 }
@@ -248,6 +250,7 @@ async function start() {
     openExternal,
     envClientId: process.env.TWITCH_CLIENT_ID || '',
     defaultClientId: pkg.twitchClientId || '',
+    appVersion: app.getVersion(),
   });
 
   controller.load();

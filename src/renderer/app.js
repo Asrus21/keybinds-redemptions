@@ -88,6 +88,11 @@ function renderTop() {
   $('#notice-text').textContent = state.notice;
   $('#paused-banner').hidden = !state.paused;
 
+  $('#update-banner').hidden = !state.update;
+  $('#update-text').textContent = state.update
+    ? `Nova versão ${state.update.version} disponível (você está na ${version}).`
+    : '';
+
   const sim = $('#sim-banner');
   sim.hidden = !state.keyboard.simulated;
   sim.textContent = state.keyboard.simulated
@@ -755,6 +760,8 @@ $('#set-login').addEventListener('change', (e) => act('updateSettings', { openAt
 $('#pause-btn').addEventListener('click', () => act('setPaused', !state.paused));
 $('#stop-btn').addEventListener('click', () => act('stopAll'));
 $('#notice-close').addEventListener('click', () => act('dismissNotice'));
+$('#update-open').addEventListener('click', () => act('openUpdate'));
+$('#update-dismiss').addEventListener('click', () => act('dismissUpdate'));
 $('#refresh-rewards').addEventListener('click', () => act('refreshRewards'));
 $('#add-rule').addEventListener('click', async () => {
   const rule = await act('addRule');
