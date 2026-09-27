@@ -136,10 +136,10 @@ npm test           # testes (node:test)
 npm run dist       # gera o instalador e o portátil em dist/ (rodar no Windows)
 ```
 
-O instalador é gerado pelo GitHub Actions (`.github/workflows/build.yml`) em todo push e PR. Para publicar uma Release, crie uma tag `v*`:
+O instalador é gerado pelo GitHub Actions (`.github/workflows/build.yml`) em todo push e PR. Para publicar uma Release, suba a versão no `package.json`, escreva as mudanças em `release-notes/v<versão>.md` e crie a tag `v*`:
 
 ```sh
-git tag v0.1.0 && git push origin v0.1.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 Há duas formas de não precisar colar o Client ID na tela:
