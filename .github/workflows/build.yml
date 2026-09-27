@@ -1,5 +1,8 @@
 # Testes em todo push/PR e o instalador do Windows como artefato do run.
-# Em tag v* (ex.: v0.1.0) o instalador também vira uma Release no GitHub.
+# O instalador também vira uma Release no GitHub de dois jeitos:
+#   - push de uma tag v* (ex.: v0.2.0);
+#   - rodando o workflow na mão (Actions → Build → Run workflow) na main com
+#     o campo "release" preenchido: o próprio workflow cria a tag no commit.
 name: Build
 
 on:
@@ -8,6 +11,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publicar uma release com esta tag (ex.: v0.2.0). Vazio = só gera o instalador.'
+        required: false
+        default: ''
 
 jobs:
   test:
@@ -45,16 +53,25 @@ jobs:
           path: dist/*.exe
           if-no-files-found: error
       - name: Publicar release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != '' && github.ref == 'refs/heads/main')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.release }}
         # As notas vêm de release-notes/<tag>.md, se existir; senão, a lista
-        # automática de PRs do GitHub.
+        # automática de PRs do GitHub. --target cria a tag neste commit quando
+        # ela ainda não existe (disparo manual).
         run: |
-          notes="release-notes/$GITHUB_REF_NAME.md"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag inválida: $TAG (use o formato v1.2.3)"; exit 1
+          fi
+          version=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "v$version" ]; then
+            echo "A tag $TAG não bate com a versão do package.json ($version)"; exit 1
+          fi
+          notes="release-notes/$TAG.md"
           if [ -f "$notes" ]; then
-            gh release create "$GITHUB_REF_NAME" dist/*.exe --title "Keybinds Redemptions $GITHUB_REF_NAME" --notes-file "$notes"
+            gh release create "$TAG" dist/*.exe --target "$GITHUB_SHA" --title "Keybinds Redemptions $TAG" --notes-file "$notes"
           else
-            gh release create "$GITHUB_REF_NAME" dist/*.exe --title "Keybinds Redemptions $GITHUB_REF_NAME" --generate-notes
+            gh release create "$TAG" dist/*.exe --target "$GITHUB_SHA" --title "Keybinds Redemptions $TAG" --generate-notes
           fi
