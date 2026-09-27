@@ -23,6 +23,7 @@ function defaultConfig() {
     settings: {
       closeToTray: true,
       openAtLogin: false,
+      dismissedUpdate: '', // versão cujo aviso o streamer dispensou
     },
   };
 }

@@ -25,6 +25,7 @@ const { startDeviceFlow, pollDeviceToken, revokeToken, SCOPES } = require('./twi
 const { TwitchApi, HelixError, SessionExpiredError } = require('./twitch/api');
 const { EventSubClient, EVENTSUB_URL } = require('./twitch/eventsub');
 const { DonationHub, CATALOG } = require('./donations');
+const { checkForUpdate } = require('./updates');
 
 const REDEMPTION_TYPE = 'channel.channel_points_custom_reward_redemption.add';
 
@@ -41,6 +42,7 @@ const TWITCH_EVENTS = [
 const LOG_SIZE = 200;
 const VALIDATE_EVERY_MS = 60 * 60 * 1000;
 const RETRY_OFFLINE_MS = 30 * 1000;
+const UPDATE_CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 
 // Client IDs da Twitch são 30 caracteres [a-z0-9]; aceitamos com folga.
 const CLIENT_ID_RE = /^[a-z0-9]{20,40}$/i;
@@ -58,6 +60,8 @@ class Controller extends EventEmitter {
    *   defaultClientId?: string,
    *   testDelayMs?: number,
    *   donationDeps?: object,
+   *   appVersion?: string,
+   *   updateUrl?: string,
    * }} opts
    */
   constructor({
@@ -71,6 +75,8 @@ class Controller extends EventEmitter {
     defaultClientId = '',
     testDelayMs = 3000,
     donationDeps,
+    appVersion = '',
+    updateUrl,
   }) {
     super();
     this.store = store;
@@ -85,6 +91,11 @@ class Controller extends EventEmitter {
 
     this.runner = new ActionRunner({ keyboard });
     this.runner.on('change', () => this.changed());
+
+    this.appVersion = appVersion;
+    this.updateUrl = updateUrl;
+    this.update = null; // { version, url } quando há release mais novo
+    this.updateTimer = null;
 
     this.donations = new DonationHub({ deps: donationDeps });
     this.donations.on('change', () => this.changed());
@@ -146,6 +157,9 @@ class Controller extends EventEmitter {
       queue: this.runner.pending,
       keyboard: { name: this.keyboard.name, simulated: !!this.keyboard.simulated },
       donations: this.donations.status(this.donationCreds),
+      // Some depois de "Agora não" até sair uma versão ainda mais nova.
+      update:
+        this.update && this.update.version !== this.config.settings.dismissedUpdate ? this.update : null,
       notice: this.notice,
     };
   }
@@ -202,6 +216,11 @@ class Controller extends EventEmitter {
   /** Carrega (se ainda não carregou) e retoma a sessão salva, se houver. */
   async init() {
     if (!this.config) this.load();
+    if (this.appVersion) {
+      this.checkUpdates();
+      clearInterval(this.updateTimer);
+      this.updateTimer = setInterval(() => this.checkUpdates(), UPDATE_CHECK_EVERY_MS);
+    }
     for (const [name, creds] of Object.entries(this.donationCreds)) {
       if (CATALOG[name]) this.donations.connect(name, creds);
     }
@@ -666,6 +685,29 @@ class Controller extends EventEmitter {
     this.changed();
   }
 
+  // ---------------------------------------------------------------- atualização
+
+  async checkUpdates() {
+    const found = await checkForUpdate({
+      currentVersion: this.appVersion,
+      fetch: this.fetch,
+      ...(this.updateUrl ? { url: this.updateUrl } : {}),
+    });
+    const changed = (found && found.version) !== (this.update && this.update.version);
+    this.update = found;
+    if (found && changed) this.info(`Versão ${found.version} disponível para download.`);
+    this.changed();
+    return found;
+  }
+
+  /** "Agora não": esconde o aviso desta versão (volta se sair outra). */
+  dismissUpdate() {
+    if (!this.update) return;
+    this.config.settings.dismissedUpdate = this.update.version;
+    this.save();
+    this.changed();
+  }
+
   updateSettings(patch) {
     const allowed = ['closeToTray', 'openAtLogin'];
     for (const key of allowed) {
@@ -679,6 +721,7 @@ class Controller extends EventEmitter {
   dispose() {
     clearTimeout(this.retryTimer);
     clearInterval(this.validateTimer);
+    clearInterval(this.updateTimer);
     this.cancelLogin();
     if (this.eventsub) this.eventsub.stop();
     this.donations.stopAll();
