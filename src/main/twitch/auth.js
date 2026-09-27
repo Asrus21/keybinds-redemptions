@@ -14,9 +14,9 @@
 
 const ID_BASE = 'https://id.twitch.tv/oauth2';
 
-// Só leitura dos resgates. É o mínimo para a EventSub avisar dos resgates e
-// para listar as recompensas do canal.
-const SCOPES = ['channel:read:redemptions'];
+// Só leitura: resgates (e a lista de recompensas), bits e subs. O app não
+// consegue mudar nada no canal.
+const SCOPES = ['channel:read:redemptions', 'bits:read', 'channel:read:subscriptions'];
 
 class TwitchAuthError extends Error {
   constructor(message, status = 0) {

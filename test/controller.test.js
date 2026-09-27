@@ -7,6 +7,7 @@ const { once } = require('node:events');
 const { WebSocketServer } = require('ws');
 
 const { Controller, REDEMPTION_TYPE } = require('../src/main/controller');
+const { SCOPES } = require('../src/main/twitch/auth');
 const { Store } = require('../src/main/store');
 const { createSimulatedKeyboard } = require('../src/main/keyboard');
 
@@ -40,7 +41,7 @@ function fakeTwitch() {
         access_token: 'access-1',
         refresh_token: 'refresh-1',
         expires_in: 14000,
-        scope: ['channel:read:redemptions'],
+        scope: SCOPES,
         token_type: 'bearer',
       });
     }
@@ -50,7 +51,7 @@ function fakeTwitch() {
         client_id: CLIENT_ID,
         login: 'streamer',
         user_id: '42',
-        scopes: ['channel:read:redemptions'],
+        scopes: SCOPES,
         expires_in: 14000,
       });
     }
@@ -176,10 +177,18 @@ test('fluxo completo: login, regra, resgate aperta a tecla, pausa, sessão salva
   const conn = await connP;
   conn.send('session_welcome', { session: { id: 'sess-1', keepalive_timeout_seconds: 10 } });
   await waitUntil(() => ctrl.snapshot().connection === 'online');
-  const sub = tw.calls.find((c) => c.path.endsWith('/eventsub/subscriptions'));
-  assert.ok(sub, 'criou a inscrição');
-  const subBody = JSON.parse(sub.body);
-  assert.equal(subBody.type, REDEMPTION_TYPE);
+  const subs = tw.calls.filter((c) => c.path.endsWith('/eventsub/subscriptions')).map((c) => JSON.parse(c.body));
+  assert.deepEqual(
+    subs.map((b) => b.type),
+    [
+      REDEMPTION_TYPE,
+      'channel.cheer',
+      'channel.subscribe',
+      'channel.subscription.message',
+      'channel.subscription.gift',
+    ]
+  );
+  const subBody = subs[0];
   assert.deepEqual(subBody.transport, { method: 'websocket', session_id: 'sess-1' });
   assert.deepEqual(subBody.condition, { broadcaster_user_id: '42' });
 
@@ -197,7 +206,7 @@ test('fluxo completo: login, regra, resgate aperta a tecla, pausa, sessão salva
     ['down', 'Space'],
     ['up', 'Space'],
   ]);
-  await waitUntil(() => ctrl.getLog().some((e) => e.kind === 'redeem' && e.outcome === 'done'));
+  await waitUntil(() => ctrl.getLog().some((e) => e.kind === 'event' && e.outcome === 'done'));
 
   // Recompensa sem regra: só registra.
   redeem(conn, 'reward-2');
@@ -273,4 +282,124 @@ test('Twitch fora do ar ao abrir: mantém o login e agenda nova tentativa', asyn
   assert.equal(snap.connection, 'offline');
   assert.match(snap.connectionDetail, /Tentando de novo/);
   assert.ok(store.loadTokens(), 'tokens continuam salvos');
+});
+
+test('bits, subs, gift subs e doação disparam as regras certas', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-ctrl-'));
+  const store = new Store({ dir });
+  store.saveConfig({ ...store.loadConfig(), clientId: CLIENT_ID });
+  store.saveTokens({ accessToken: 'a', refreshToken: 'r', expiresAt: Date.now() + 3600e3, scopes: SCOPES });
+
+  // StreamElements de mentira (Socket.IO cru, EIO=3).
+  const se = new WebSocketServer({ port: 0 });
+  await once(se, 'listening');
+  let seConn;
+  se.on('connection', (ws) => {
+    seConn = ws;
+    ws.on('message', (m) => {
+      const text = String(m);
+      if (text.startsWith('42["authenticate"')) ws.send('42["authenticated",{}]');
+    });
+    ws.send('0{"sid":"s","pingInterval":25000,"pingTimeout":5000}');
+    ws.send('40');
+  });
+
+  const tw = fakeTwitch();
+  const es = await mockEventSub();
+  const ctrl = new Controller({
+    store,
+    keyboard: createSimulatedKeyboard(),
+    fetch: tw.fetch,
+    eventSubUrl: es.url,
+    donationDeps: { streamelements: { url: `http://127.0.0.1:${se.address().port}` } },
+  });
+  t.after(async () => {
+    ctrl.dispose();
+    for (const c of se.clients) c.terminate();
+    await new Promise((r) => se.close(r));
+    await es.close();
+  });
+  const connP = es.next();
+  await ctrl.init();
+  const conn = await connP;
+  conn.send('session_welcome', { session: { id: 'sess', keepalive_timeout_seconds: 10 } });
+  await waitUntil(() => ctrl.snapshot().connection === 'online');
+
+  const add = (fields) => {
+    const r = ctrl.addRule();
+    return ctrl.updateRule(r.id, { holdMs: 10, ...fields });
+  };
+  add({ trigger: 'bits', min: 100, keys: ['KeyB'] });
+  add({ trigger: 'bits', min: 1000, keys: ['KeyN'] });
+  add({ trigger: 'sub', tier: 'any', keys: ['KeyS'] });
+  add({ trigger: 'gift', min: 5, keys: ['KeyP'] });
+  add({ trigger: 'donation', min: '10,00', source: 'streamelements', keys: ['KeyD'] });
+
+  const pressed = () => ctrl.keyboard.events.filter(([dir]) => dir === 'down').map(([, code]) => code);
+  const notify = (type, event) => conn.send('notification', { subscription: { type }, event }, { subscription_type: type });
+
+  notify('channel.cheer', { is_anonymous: false, user_name: 'Bitador', bits: 1500 });
+  notify('channel.cheer', { is_anonymous: true, user_name: null, bits: 50 }); // abaixo de 100: nada
+  notify('channel.subscribe', { user_name: 'Novo', tier: '1000', is_gift: false });
+  notify('channel.subscribe', { user_name: 'Presenteado', tier: '1000', is_gift: true }); // conta no gift
+  notify('channel.subscription.message', { user_name: 'Antigo', tier: '2000', cumulative_months: 12 });
+  notify('channel.subscription.gift', { user_name: 'Generoso', total: 10, tier: '1000', is_anonymous: false });
+  notify('channel.subscription.gift', { user_name: null, total: 1, tier: '1000', is_anonymous: true }); // abaixo de 5
+  await waitUntil(() => pressed().length === 4);
+  assert.deepEqual(pressed(), ['KeyN', 'KeyS', 'KeyS', 'KeyP'], '1500 bits cai só na faixa de 1000+');
+
+  // Doação pelo StreamElements, conectado pela tela.
+  assert.equal(ctrl.connectDonation('streamelements', { token: 'jwt' }), true);
+  await waitUntil(() => ctrl.snapshot().donations.find((d) => d.name === 'streamelements').state === 'online');
+  seConn.send(`42${JSON.stringify(['event', { type: 'tip', data: { tipId: 't1', displayName: 'Doador', amount: 9.99, currency: 'BRL' } }])}`);
+  seConn.send(`42${JSON.stringify(['event', { type: 'tip', data: { tipId: 't2', displayName: 'Doador', amount: 15, currency: 'BRL' } }])}`);
+  await waitUntil(() => pressed().length === 5);
+  assert.equal(pressed()[4], 'KeyD');
+  await waitUntil(() => ctrl.getLog().every((e) => e.outcome !== 'queued'));
+
+  const log = ctrl.getLog().filter((e) => e.kind === 'event');
+  const line = (e) => `${e.user} ${e.action} ${e.target} [${e.outcome}]`;
+  const lines = log.map(line);
+  assert.ok(lines.includes('Bitador mandou 1.500 bits [done]'), lines.join('\n'));
+  assert.ok(lines.includes('Anônimo mandou 50 bits [ignored]'));
+  assert.ok(lines.includes('Antigo renovou Tier 2 · 12 meses [done]'));
+  assert.ok(lines.includes('Generoso deu 10 subs de presente [done]'));
+  assert.ok(lines.some((l) => /^Doador doou R\$\s?15,00 \[done\]$/.test(l)), lines.join('\n'));
+  assert.ok(lines.some((l) => /^Doador doou R\$\s?9,99 \[ignored\]$/.test(l)));
+  assert.equal(log.find((e) => e.action === 'doou').via, 'StreamElements');
+  assert.ok(!lines.some((l) => l.startsWith('Presenteado')), 'sub de presente não aparece duas vezes');
+
+  // Credencial salva cifrada e some ao desconectar.
+  assert.deepEqual(store.loadSecret('donations'), { streamelements: { token: 'jwt' } });
+  ctrl.disconnectDonation('streamelements');
+  assert.equal(store.loadSecret('donations'), null);
+  assert.throws(() => ctrl.connectDonation('livepix', { clientId: 'x' }), /Client Secret/);
+});
+
+test('Twitch recusa bits/subs (403): resgates seguem funcionando, com aviso', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-ctrl-'));
+  const store = new Store({ dir });
+  store.saveConfig({ ...store.loadConfig(), clientId: CLIENT_ID });
+  store.saveTokens({ accessToken: 'a', refreshToken: 'r', expiresAt: Date.now() + 3600e3, scopes: SCOPES });
+  const tw = fakeTwitch();
+  const fetch = async (url, init = {}) => {
+    if (String(url).includes('/eventsub/subscriptions') && !String(init.body).includes('reward_redemption')) {
+      return new Response(JSON.stringify({ status: 403, message: 'subscription missing proper authorization' }), { status: 403 });
+    }
+    return tw.fetch(url, init);
+  };
+  const es = await mockEventSub();
+  const ctrl = new Controller({ store, keyboard: createSimulatedKeyboard(), fetch, eventSubUrl: es.url });
+  t.after(() => {
+    ctrl.dispose();
+    return es.close();
+  });
+  const connP = es.next();
+  await ctrl.init();
+  const conn = await connP;
+  conn.send('session_welcome', { session: { id: 'sess', keepalive_timeout_seconds: 10 } });
+  await waitUntil(() => ctrl.snapshot().connection === 'online');
+  const errors = ctrl.getLog().filter((e) => e.kind === 'error').map((e) => e.text);
+  assert.equal(errors.length, 4);
+  assert.match(errors.join('\n'), /bits: subscription missing proper authorization/);
 });

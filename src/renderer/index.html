@@ -43,6 +43,12 @@
         <div class="col-side">
           <section class="card" id="account-card" aria-live="polite"></section>
 
+          <section class="card" id="donations-card">
+            <h2>Doações</h2>
+            <p class="hint">Conecte o serviço onde você recebe doações para usar regras de “Doação”.</p>
+            <div id="donations-list" class="sources"></div>
+          </section>
+
           <section class="card">
             <h2>Preferências</h2>
             <label class="check">
@@ -60,7 +66,7 @@
         <div class="col-main">
           <section class="card">
             <div class="card-head">
-              <h2>Recompensas → teclas</h2>
+              <h2>Eventos → teclas</h2>
               <div class="row-actions">
                 <button id="refresh-rewards" type="button" class="btn ghost">Atualizar recompensas</button>
                 <button id="add-rule" type="button" class="btn primary">+ Nova regra</button>
@@ -69,7 +75,10 @@
             <p class="hint" id="rewards-status"></p>
             <div id="rules-list" class="rules"></div>
             <div id="rules-empty" class="empty">
-              <p><strong>Nenhuma regra ainda.</strong> Clique em “+ Nova regra”, escolha a recompensa e a tecla.</p>
+              <p>
+                <strong>Nenhuma regra ainda.</strong> Clique em “+ Nova regra”, escolha o evento (recompensa, bits,
+                sub, gift sub ou doação) e a tecla.
+              </p>
               <p class="hint">
                 Dica: F13 a F24 não existem no teclado comum — são ótimas para atalhos do OBS, porque não
                 conflitam com nada do jogo.
@@ -83,7 +92,7 @@
               <span id="queue-count" class="meta"></span>
             </div>
             <ol id="log-list" class="log"></ol>
-            <p id="log-empty" class="hint">Os resgates vão aparecer aqui assim que chegarem.</p>
+            <p id="log-empty" class="hint">Resgates, bits, subs e doações aparecem aqui assim que chegarem.</p>
           </section>
         </div>
       </main>

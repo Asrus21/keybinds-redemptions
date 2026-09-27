@@ -1,8 +1,8 @@
 {
   "name": "keybinds-redemptions",
   "productName": "Keybinds Redemptions",
-  "version": "0.1.0",
-  "description": "Aperta uma tecla no PC do streamer quando alguém resgata uma recompensa de pontos do canal na Twitch.",
+  "version": "0.2.0",
+  "description": "Aperta uma tecla no PC do streamer em resgates, bits, subs, gift subs e doações da live.",
   "author": "Thiago Arruda <tarruda1513@gmail.com>",
   "private": true,
   "main": "src/main/main.js",

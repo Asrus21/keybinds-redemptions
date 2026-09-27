@@ -67,7 +67,7 @@ function renderTop() {
   const pill = $('#conn-pill');
   let pillState = state.connection;
   let text = {
-    online: 'Escutando resgates',
+    online: 'Escutando eventos',
     connecting: 'Conectando…',
     reconnecting: 'Reconectando…',
     offline: state.auth === 'signed-in' ? 'Sem conexão' : 'Desconectado',
@@ -171,7 +171,7 @@ function accountView() {
   // signed-in
   const a = state.account;
   const status = {
-    online: 'Escutando os resgates do canal.',
+    online: 'Escutando resgates, bits e subs do canal.',
     connecting: 'Conectando à Twitch…',
     reconnecting: state.connectionDetail || 'Reconectando…',
     offline: state.connectionDetail || 'Sem conexão com a Twitch.',
@@ -257,7 +257,7 @@ function renderRewardsStatus() {
   } else if (state.rewardsStatus === 'ok') {
     const n = state.rewards.length;
     text = n
-      ? `${n} ${n === 1 ? 'recompensa' : 'recompensas'} no canal. Cada regra aperta a tecla quando alguém resgatar.`
+      ? `${n} ${n === 1 ? 'recompensa' : 'recompensas'} de pontos no canal.`
       : 'O canal ainda não tem recompensas personalizadas. Crie no Painel do Criador → Pontos do canal e clique em “Atualizar recompensas”.';
   }
   el.textContent = text;
@@ -295,13 +295,78 @@ function numberField(label, suffix, field, id, { min, max }) {
   return { wrap, input };
 }
 
+const TRIGGER_OPTIONS = [
+  ['reward', 'Recompensa'],
+  ['bits', 'Bits'],
+  ['sub', 'Sub'],
+  ['gift', 'Gift sub'],
+  ['donation', 'Doação'],
+];
+const TIER_OPTIONS = [
+  ['any', 'Qualquer tier'],
+  ['1000', 'Tier 1'],
+  ['2000', 'Tier 2'],
+  ['3000', 'Tier 3'],
+];
+const SOURCE_OPTIONS = [
+  ['any', 'Qualquer serviço'],
+  ['streamelements', 'StreamElements'],
+  ['streamlabs', 'Streamlabs'],
+  ['livepix', 'LivePix'],
+  ['pixgg', 'PixGG'],
+];
+// Rótulos da faixa de valor de cada gatilho: [antes do mínimo, unidade].
+const RANGE_LABELS = {
+  bits: ['a partir de', 'bits'],
+  gift: ['a partir de', 'subs'],
+  donation: ['de', ''],
+};
+
+function optionsOf(pairs) {
+  return pairs.map(([value, label]) => h('option', { value }, label));
+}
+
+/** Campo "a partir de X até Y" dos gatilhos com valor. */
+function rangeField(id) {
+  const lead = h('span');
+  const min = h('input', { type: 'number', min: 0, class: 'amount', 'aria-label': 'Valor mínimo' });
+  const max = h('input', { type: 'number', min: 0, class: 'amount', placeholder: 'sem limite', 'aria-label': 'Valor máximo' });
+  const unit = h('span');
+  const send = async (field, input) => {
+    const rule = await act('updateRule', id, { [field]: input.value === '' ? 0 : input.value });
+    if (rule) input.value = rule[field] || (field === 'max' ? '' : rule[field]);
+  };
+  min.addEventListener('change', () => send('min', min));
+  max.addEventListener('change', () => send('max', max));
+  const wrap = h('span', { class: 'range' }, lead, min, h('span', null, 'até'), max, unit);
+  return { wrap, lead, min, max, unit };
+}
+
 function createRuleRow(id) {
   const toggle = h('input', { type: 'checkbox', 'aria-label': 'Regra ativa' });
   toggle.addEventListener('change', () => act('updateRule', id, { enabled: toggle.checked }));
 
+  const trigger = h('select', { class: 'select trigger', 'aria-label': 'Tipo de evento' }, optionsOf(TRIGGER_OPTIONS));
+  trigger.addEventListener('change', () => act('updateRule', id, { trigger: trigger.value }));
+
+  // Recompensa
   const icon = h('div', { class: 'reward-icon' });
   const select = h('select', { class: 'select', 'aria-label': 'Recompensa' });
   select.addEventListener('change', () => act('updateRule', id, { rewardId: select.value }));
+  const rewardWrap = h('span', { class: 'reward-pick' }, icon, select);
+
+  // Sub
+  const tier = h('select', { class: 'select', 'aria-label': 'Tier da sub' }, optionsOf(TIER_OPTIONS));
+  tier.addEventListener('change', () => act('updateRule', id, { tier: tier.value }));
+
+  // Doação
+  const source = h('select', { class: 'select', 'aria-label': 'Serviço de doação' }, optionsOf(SOURCE_OPTIONS));
+  source.addEventListener('change', () => act('updateRule', id, { source: source.value }));
+
+  // Bits, gift e doação
+  const range = rangeField(id);
+
+  const detail = h('div', { class: 'trigger-detail' }, rewardWrap, tier, source, range.wrap);
 
   const keysBtn = h('button', { class: 'keys-btn', type: 'button', title: 'Escolher a tecla', onclick: () => openKeyDialog(id) });
 
@@ -317,7 +382,7 @@ function createRuleRow(id) {
   const remove = h('button', { class: 'btn small ghost', type: 'button' }, 'Remover');
   remove.addEventListener('click', () => {
     const rule = state.rules.find((r) => r.id === id);
-    const configured = rule && (rule.rewardId || rule.keys.length);
+    const configured = rule && (rule.rewardId || rule.keys.length || rule.trigger !== 'reward');
     if (configured && !window.confirm('Remover esta regra?')) return;
     act('removeRule', id);
   });
@@ -329,20 +394,83 @@ function createRuleRow(id) {
       'div',
       { class: 'rule-main' },
       h('label', { class: 'switch', title: 'Ligar/desligar esta regra' }, toggle, h('span')),
-      icon,
-      select,
+      trigger,
+      detail,
       h('span', { class: 'arrow' }, '→'),
       keysBtn
     ),
     h('div', { class: 'rule-details' }, hold.wrap, repeat.wrap, gap.wrap, warn, h('span', { class: 'spacer' }), test, remove)
   );
-  return Object.assign(els, { root, toggle, icon, select, keysBtn, hold, repeat, gap, warn, test, rewardsKey: '', testing: false });
+  return Object.assign(els, {
+    root,
+    toggle,
+    trigger,
+    icon,
+    select,
+    rewardWrap,
+    tier,
+    source,
+    range,
+    keysBtn,
+    hold,
+    repeat,
+    gap,
+    warn,
+    test,
+    rewardsKey: '',
+    testing: false,
+  });
+}
+
+function setIfIdle(el, value) {
+  if (document.activeElement !== el) el.value = value;
 }
 
 function updateRuleRow(els, rule) {
   els.root.classList.toggle('off', !rule.enabled);
   els.toggle.checked = rule.enabled;
+  setIfIdle(els.trigger, rule.trigger);
 
+  const t = rule.trigger;
+  els.rewardWrap.hidden = t !== 'reward';
+  els.tier.hidden = t !== 'sub';
+  els.source.hidden = t !== 'donation';
+  els.range.wrap.hidden = !RANGE_LABELS[t];
+
+  if (t === 'reward') updateRewardPick(els, rule);
+  setIfIdle(els.tier, rule.tier);
+  setIfIdle(els.source, rule.source);
+  if (RANGE_LABELS[t]) {
+    const [lead, unit] = RANGE_LABELS[t];
+    els.range.lead.textContent = lead;
+    els.range.unit.textContent = unit;
+    const step = t === 'donation' ? '0.01' : '1';
+    els.range.min.step = step;
+    els.range.max.step = step;
+    setIfIdle(els.range.min, rule.min);
+    setIfIdle(els.range.max, rule.max || '');
+  }
+
+  els.keysBtn.replaceChildren(
+    rule.keys.length ? chips(rule.keys) : h('span', { class: 'placeholder' }, 'Escolher tecla…')
+  );
+
+  for (const [f, field] of [
+    ['holdMs', els.hold],
+    ['repeat', els.repeat],
+    ['gapMs', els.gap],
+  ]) {
+    setIfIdle(field.input, rule[f]);
+  }
+  // Intervalo só faz sentido quando repete.
+  els.gap.wrap.hidden = rule.repeat <= 1;
+
+  const missing = [t === 'reward' && !rule.rewardId && 'a recompensa', !rule.keys.length && 'a tecla'].filter(Boolean);
+  els.warn.textContent = missing.length ? `Falta escolher ${missing.join(' e ')}.` : '';
+  if (!els.testing) els.test.disabled = !rule.keys.length;
+}
+
+function updateRewardPick(els, rule) {
   // Opções da lista: só refaz quando as recompensas (ou a escolhida) mudam.
   const rewardsKey = JSON.stringify([state.rewards, rule.rewardId, rule.rewardTitle]);
   if (rewardsKey !== els.rewardsKey) {
@@ -361,29 +489,11 @@ function updateRuleRow(els, rule) {
     els.select.replaceChildren(...options);
     els.select.value = rule.rewardId;
   }
-  if (document.activeElement !== els.select) els.select.value = rule.rewardId;
+  setIfIdle(els.select, rule.rewardId);
 
   const reward = rewardById(rule.rewardId);
   els.icon.style.background = reward && reward.color ? reward.color : '';
   els.icon.replaceChildren(reward && reward.image ? h('img', { src: reward.image, alt: '' }) : '');
-
-  els.keysBtn.replaceChildren(
-    rule.keys.length ? chips(rule.keys) : h('span', { class: 'placeholder' }, 'Escolher tecla…')
-  );
-
-  for (const [f, field] of [
-    ['holdMs', els.hold],
-    ['repeat', els.repeat],
-    ['gapMs', els.gap],
-  ]) {
-    if (document.activeElement !== field.input) field.input.value = rule[f];
-  }
-  // Intervalo só faz sentido quando repete.
-  els.gap.wrap.hidden = rule.repeat <= 1;
-
-  const missing = [!rule.rewardId && 'a recompensa', !rule.keys.length && 'a tecla'].filter(Boolean);
-  els.warn.textContent = missing.length ? `Falta escolher ${missing.join(' e ')}.` : '';
-  if (!els.testing) els.test.disabled = !rule.keys.length;
 }
 
 async function runTest(id, els) {
@@ -515,11 +625,12 @@ function timeOf(ms) {
 function fillLogItem(li, entry) {
   li.className = entry.kind;
   const what = h('div', { class: 'what' });
-  if (entry.kind === 'redeem' || entry.kind === 'test') {
-    if (entry.kind === 'redeem') {
-      what.append(h('strong', null, entry.user), ' resgatou ', h('span', { class: 'reward' }, entry.reward));
+  if (entry.kind === 'event' || entry.kind === 'test') {
+    if (entry.kind === 'event') {
+      what.append(h('strong', null, entry.user), ` ${entry.action} `, h('span', { class: 'reward' }, entry.target));
+      if (entry.via) what.append(h('span', { class: 'via' }, entry.via));
     } else {
-      what.append('Teste de ', h('span', { class: 'reward' }, entry.reward));
+      what.append('Teste — ', h('span', { class: 'reward' }, entry.target));
     }
     if (entry.keys && entry.keys.length) what.append(h('span', { class: 'plus' }, '→'), chips(entry.keys));
     if (entry.error) what.append(h('span', { class: 'hint bad' }, entry.error));
@@ -553,6 +664,79 @@ function upsertLog(entry, { initial = false } = {}) {
   }
   fillLogItem(li, entry);
   $('#log-empty').hidden = list.children.length > 0;
+}
+
+// ------------------------------------------------------------------ doações
+
+const STATE_LABELS = {
+  online: 'conectado',
+  connecting: 'conectando…',
+  reconnecting: 'reconectando…',
+  error: 'erro',
+  offline: 'desconectado',
+};
+let donationsKey = '';
+const openSources = new Set();
+
+function renderDonations() {
+  // Não refaz enquanto o streamer digita um token.
+  const key = JSON.stringify([state.donations, [...openSources]]);
+  if (key === donationsKey) return;
+  const typing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#donations-list');
+  if (typing) return;
+  donationsKey = key;
+  $('#donations-list').replaceChildren(...state.donations.map(sourceView));
+}
+
+function sourceView(src) {
+  const pillState = src.state === 'error' ? 'error' : src.configured ? src.state : 'offline';
+  const head = h(
+    'div',
+    { class: 'source-head' },
+    h('strong', null, src.label),
+    h('span', { class: 'pill small', 'data-state': pillState }, h('i'), h('b', null, src.configured ? STATE_LABELS[src.state] || src.state : 'não configurado'))
+  );
+  const children = [head];
+  if (src.detail) children.push(h('p', { class: src.state === 'error' ? 'hint bad' : 'hint' }, src.detail));
+
+  const editing = openSources.has(src.name) || !src.configured;
+  if (src.configured && !openSources.has(src.name)) {
+    children.push(
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { class: 'btn small', type: 'button', onclick: () => (openSources.add(src.name), (donationsKey = ''), renderDonations()) }, 'Trocar token'),
+        h('button', { class: 'btn small ghost', type: 'button', onclick: () => act('disconnectDonation', src.name) }, 'Desconectar')
+      )
+    );
+  } else if (editing) {
+    const inputs = src.fields.map((f) =>
+      h('input', { class: 'input mono', type: 'password', placeholder: f.label, 'aria-label': f.label, autocomplete: 'off', spellcheck: 'false' })
+    );
+    const save = async () => {
+      const creds = {};
+      src.fields.forEach((f, i) => (creds[f.key] = inputs[i].value));
+      if (!(await act('connectDonation', src.name, creds))) return; // erro: o aviso já apareceu
+      openSources.delete(src.name);
+      document.activeElement.blur();
+      donationsKey = '';
+      renderDonations();
+    };
+    for (const input of inputs) input.addEventListener('keydown', (e) => e.key === 'Enter' && save());
+    children.push(
+      h('div', { class: 'source-fields' }, inputs),
+      h('p', { class: 'hint small' }, `Onde achar: ${src.help}`),
+      h(
+        'div',
+        { class: 'btn-row' },
+        h('button', { class: 'btn small primary', type: 'button', onclick: save }, 'Conectar'),
+        src.configured
+          ? h('button', { class: 'btn small ghost', type: 'button', onclick: () => (openSources.delete(src.name), (donationsKey = ''), renderDonations()) }, 'Cancelar')
+          : null
+      )
+    );
+  }
+  return h('details', { class: 'source', open: src.configured || openSources.has(src.name) ? true : null }, h('summary', null, head), ...children.slice(1));
 }
 
 // ------------------------------------------------------------------ preferências
@@ -590,6 +774,7 @@ function render(next) {
   renderAccount();
   renderRewardsStatus();
   renderRules();
+  renderDonations();
   renderSettings();
 }
 
