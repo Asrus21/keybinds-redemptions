@@ -68,7 +68,7 @@ A LivePix não tem conexão em tempo real aberta: o app consulta as doações no
 
 **PixGG:** o PixGG só avisa de doação por webhook, que precisa de um endereço público na internet, e o seu PC não tem um. Por isso o aviso passa pelo **asrus.app**:
 
-1. Ao conectar, o app cadastra sozinho a URL de webhook da sua aplicação do PixGG para `https://asrus.app/api/pixgg/relay/<código>`. O código é gerado a partir do seu Client Secret: é fixo, ninguém adivinha, e o segredo não sai do PC.
+1. Ao conectar, o app cadastra sozinho a URL de webhook da sua aplicação do PixGG para `https://www.asrus.app/api/pixgg/relay/<código>`. O código é gerado a partir do seu Client Secret: é fixo, ninguém adivinha, e o segredo não sai do PC.
 2. O asrus.app guarda o aviso por até 24 h, sem abrir.
 3. O app busca os avisos novos a cada 3 segundos e confere a assinatura de cada um com o seu Client Secret. Aviso com assinatura errada é descartado.
 
