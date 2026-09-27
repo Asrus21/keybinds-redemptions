@@ -306,6 +306,7 @@ function searchTextOf(rule) {
     rule.min || '',
     rule.max || '',
     rule.enabled ? 'ligada' : 'desligada',
+    rule.cooldownMs ? 'espera cooldown' : '',
   ];
   return parts.join(' ').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 }
@@ -457,7 +458,25 @@ function createRuleRow(id) {
   const keysBtn = h('button', { class: 'keys-btn', type: 'button', title: 'Escolher a tecla', onclick: () => openKeyDialog(id) });
 
   // Segurar e esperar viraram campos de cada passo, dentro do diálogo.
-  const repeat = numberField('Repetir a sequência', '×', 'repeat', id, { min: 1, max: 100 });
+  const repeat = numberField('Repetir', '×', 'repeat', id, { min: 1, max: 100 });
+  repeat.wrap.title = 'Quantas vezes a sequência inteira roda';
+
+  // Tempo de espera. Em segundos na tela, milissegundos no arquivo: ninguém
+  // quer escrever "30000" para meio minuto.
+  const cooldown = h('input', { type: 'number', min: 0, max: 3600, step: 1 });
+  cooldown.addEventListener('change', async () => {
+    const rule = await act('updateRule', id, { cooldownMs: Math.round(Number(cooldown.value) * 1000) });
+    if (rule) cooldown.value = rule.cooldownMs / 1000;
+  });
+  const perUser = h('input', { type: 'checkbox' });
+  perUser.addEventListener('change', () => act('updateRule', id, { cooldownPerUser: perUser.checked }));
+  const perUserWrap = h(
+    'label',
+    { title: 'A espera conta para cada pessoa, então uma sozinha não segura a regra para o chat todo' },
+    perUser,
+    'por pessoa'
+  );
+  const cooldownWrap = h('label', { class: 'cooldown' }, 'Esperar', cooldown, 's');
 
   const warn = h('span', { class: 'rule-warn' });
   const test = h('button', { class: 'btn small', type: 'button' }, 'Testar');
@@ -484,7 +503,17 @@ function createRuleRow(id) {
       h('span', { class: 'arrow' }, '→'),
       keysBtn
     ),
-    h('div', { class: 'rule-details' }, repeat.wrap, warn, h('span', { class: 'spacer' }), test, remove)
+    h(
+      'div',
+      { class: 'rule-details' },
+      repeat.wrap,
+      cooldownWrap,
+      perUserWrap,
+      warn,
+      h('span', { class: 'spacer' }),
+      test,
+      remove
+    )
   );
   return Object.assign(els, {
     root,
@@ -501,6 +530,9 @@ function createRuleRow(id) {
     range,
     keysBtn,
     repeat,
+    cooldown,
+    perUser,
+    perUserWrap,
     warn,
     test,
     rewardsKey: '',
@@ -546,6 +578,10 @@ function updateRuleRow(els, rule) {
   );
 
   setIfIdle(els.repeat.input, rule.repeat);
+  setIfIdle(els.cooldown, rule.cooldownMs / 1000);
+  els.perUser.checked = rule.cooldownPerUser;
+  // "por pessoa" só faz sentido com espera, e só em evento que tem pessoa.
+  els.perUserWrap.hidden = !rule.cooldownMs;
 
   const missing = [
     t === 'reward' && !rule.rewardId && 'a recompensa',
@@ -817,6 +853,7 @@ const OUTCOMES = {
   done: ['done', 'apertou'],
   error: ['error', 'falhou'],
   aborted: ['aborted', 'interrompido'],
+  cooldown: ['paused', 'esperando'],
   paused: ['paused', 'pausado'],
   ignored: ['', 'sem regra'],
 };

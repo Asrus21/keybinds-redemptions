@@ -47,6 +47,8 @@ const LIMITS = {
   holdMs: { min: 10, max: 60_000, default: 60 },
   repeat: { min: 1, max: 100, default: 1 },
   gapMs: { min: 0, max: 10_000, default: 100 },
+  // 0 = sem espera. O teto de 1 hora é o que cabe numa live.
+  cooldownMs: { min: 0, max: 3_600_000, default: 0 },
 };
 
 // Faixa de valor de cada gatilho. max = 0 quer dizer "sem limite".
@@ -150,6 +152,10 @@ function normalizeRule(raw) {
     source: DONATION_SOURCES.includes(r.source) ? r.source : 'any',
     command: cleanCommand(r.command),
     who: CHATTERS.includes(r.who) ? r.who : 'all',
+    cooldownMs: clampInt(r.cooldownMs, LIMITS.cooldownMs),
+    // Por pessoa: a espera conta para cada nick separado, então uma pessoa
+    // sozinha não segura a regra para o resto do chat.
+    cooldownPerUser: r.cooldownPerUser === true,
     steps: normalizeSteps(r),
     repeat: clampInt(r.repeat, LIMITS.repeat),
   };
@@ -160,7 +166,7 @@ function patchRule(rule, patch) {
   const p = patch && typeof patch === 'object' ? patch : {};
   const editable = [
     'enabled', 'trigger', 'rewardId', 'rewardTitle', 'min', 'max', 'tier', 'source',
-    'command', 'who', 'steps', 'repeat',
+    'command', 'who', 'cooldownMs', 'cooldownPerUser', 'steps', 'repeat',
   ];
   const next = { ...rule };
   for (const field of editable) {

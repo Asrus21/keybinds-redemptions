@@ -495,3 +495,119 @@ test('selo não conhecido não dá poder nenhum', async (t) => {
   assert.deepEqual(ctrl.snapshot().rules.length, 1);
   assert.equal(ctrl.getLog()[0].outcome, 'ignored');
 });
+
+// Um controller cru, sem Twitch: o suficiente para exercitar as regras.
+function bareCtrl(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-cd-'));
+  const kb = createSimulatedKeyboard();
+  const c = new Controller({ store: new Store({ dir }), keyboard: kb, fetch: async () => new Response('{}') });
+  t.after(() => c.dispose());
+  c.load();
+  return { c, kb };
+}
+
+const cheer = (c, user, amount = 100) =>
+  c.dispatch({ kind: 'bits', amount, user, action: 'mandou', target: `${amount} bits` });
+
+test('espera por regra: segura o chat todo até o tempo passar', async (t) => {
+  const { c, kb } = bareCtrl(t);
+  const r = c.addRule();
+  c.updateRule(r.id, { trigger: 'bits', min: 1, keys: ['KeyA'], holdMs: 10, cooldownMs: 30_000 });
+
+  cheer(c, 'Ana');
+  cheer(c, 'Ana');
+  cheer(c, 'Bruno'); // outra pessoa também espera: a espera é da regra
+  await waitUntil(() => c.runner.pending === 0);
+
+  assert.equal(kb.events.filter(([d]) => d === 'down').length, 1);
+  const outcomes = c.getLog().filter((e) => e.kind === 'event').map((e) => e.outcome);
+  assert.deepEqual(outcomes, ['cooldown', 'cooldown', 'done']);
+  assert.match(c.getLog()[0].error, /^Esperando 30 s\.$/);
+});
+
+test('espera por pessoa: uma pessoa sozinha não trava a regra para o chat', async (t) => {
+  const { c, kb } = bareCtrl(t);
+  const r = c.addRule();
+  c.updateRule(r.id, {
+    trigger: 'bits',
+    min: 1,
+    keys: ['KeyA'],
+    holdMs: 10,
+    cooldownMs: 30_000,
+    cooldownPerUser: true,
+  });
+
+  cheer(c, 'Ana');
+  cheer(c, 'ana'); // mesmo nick com outra caixa continua sendo a mesma pessoa
+  cheer(c, 'Bruno'); // pessoa diferente passa na hora
+  await waitUntil(() => c.runner.pending === 0);
+
+  assert.equal(kb.events.filter(([d]) => d === 'down').length, 2, 'Ana uma vez, Bruno uma vez');
+  const outcomes = c.getLog().filter((e) => e.kind === 'event').map((e) => e.outcome);
+  assert.deepEqual(outcomes, ['done', 'cooldown', 'done']);
+  assert.match(c.getLog()[1].error, /para esta pessoa/);
+});
+
+test('espera vencida libera de novo, e regra sem espera nunca trava', async (t) => {
+  const { c, kb } = bareCtrl(t);
+  const curta = c.addRule();
+  c.updateRule(curta.id, { trigger: 'bits', min: 1, keys: ['KeyA'], holdMs: 10, cooldownMs: 20 });
+  cheer(c, 'Ana');
+  cheer(c, 'Ana');
+  await new Promise((r) => setTimeout(r, 40));
+  cheer(c, 'Ana');
+  await waitUntil(() => c.runner.pending === 0);
+  assert.equal(kb.events.filter(([d]) => d === 'down').length, 2, 'passou de novo depois do tempo');
+
+  const { c: c2, kb: kb2 } = bareCtrl(t);
+  const livre = c2.addRule();
+  c2.updateRule(livre.id, { trigger: 'bits', min: 1, keys: ['KeyB'], holdMs: 10 });
+  for (let i = 0; i < 5; i++) cheer(c2, 'Ana');
+  await waitUntil(() => c2.runner.pending === 0);
+  assert.equal(kb2.events.filter(([d]) => d === 'down').length, 5);
+});
+
+test('"Testar" não é barrado pela espera nem consome ela', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-cd-'));
+  const kb = createSimulatedKeyboard();
+  const c = new Controller({
+    store: new Store({ dir }),
+    keyboard: kb,
+    fetch: async () => new Response('{}'),
+    testDelayMs: 0,
+  });
+  t.after(() => c.dispose());
+  c.load();
+  const r = c.addRule();
+  c.updateRule(r.id, { trigger: 'bits', min: 1, keys: ['KeyA'], holdMs: 10, cooldownMs: 60_000 });
+
+  await c.testRule(r.id);
+  await c.testRule(r.id);
+  assert.equal(kb.events.filter(([d]) => d === 'down').length, 2, 'o clique do streamer sempre passa');
+
+  // E o teste não gastou a espera do chat.
+  cheer(c, 'Ana');
+  await waitUntil(() => c.runner.pending === 0);
+  assert.equal(kb.events.filter(([d]) => d === 'down').length, 3);
+});
+
+test('pausado não gasta a espera', async (t) => {
+  const { c, kb } = bareCtrl(t);
+  const r = c.addRule();
+  c.updateRule(r.id, { trigger: 'bits', min: 1, keys: ['KeyA'], holdMs: 10, cooldownMs: 60_000 });
+  c.setPaused(true);
+  cheer(c, 'Ana');
+  c.setPaused(false);
+  cheer(c, 'Ana');
+  await waitUntil(() => c.runner.pending === 0);
+  assert.equal(kb.events.filter(([d]) => d === 'down').length, 1, 'o evento pausado não queimou a espera');
+});
+
+test('o mapa de esperas não cresce sem fim', async (t) => {
+  const { c } = bareCtrl(t);
+  const r = c.addRule();
+  c.updateRule(r.id, { trigger: 'bits', min: 1, keys: ['KeyA'], holdMs: 10, cooldownMs: 1, cooldownPerUser: true });
+  for (let i = 0; i < 1200; i++) cheer(c, `pessoa${i}`);
+  await waitUntil(() => c.runner.pending === 0);
+  assert.ok(c.cooldowns.size <= 1000, `sobraram ${c.cooldowns.size} entradas`);
+});
