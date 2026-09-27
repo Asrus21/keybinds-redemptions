@@ -223,6 +223,9 @@ class Controller extends EventEmitter {
   load() {
     this.config = this.store.loadConfig();
     this.config.rules = this.config.rules.map(normalizeRule);
+    if (this.store.restoredFrom) {
+      this.error(`O config.json não abriu; as regras vieram da cópia ${this.store.restoredFrom}.`);
+    }
     this.tokens = this.store.loadTokens();
     this.donationCreds = this.store.loadSecret('donations') || {};
     if (this.keyboard.simulated) {

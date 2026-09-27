@@ -278,6 +278,33 @@ function renderRewardsStatus() {
   $('#refresh-rewards').disabled = state.auth !== 'signed-in' || state.rewardsStatus === 'loading';
 }
 
+// Filtro da lista de regras. Vive só na tela: não é salvo nem some ao
+// chegar um evento, porque o texto fica aqui e não no estado do app.
+let ruleSearch = '';
+
+/** Tudo que dá para procurar numa regra, em minúsculas e sem acento. */
+function searchTextOf(rule) {
+  const label = (pairs, value) => (pairs.find(([v]) => v === value) || [, ''])[1];
+  const parts = [
+    label(TRIGGER_OPTIONS, rule.trigger),
+    rule.rewardTitle,
+    rule.trigger === 'sub' ? label(TIER_OPTIONS, rule.tier) : '',
+    rule.trigger === 'donation' ? label(SOURCE_OPTIONS, rule.source) : '',
+    ...rule.keys.map(labelOf),
+    rule.min || '',
+    rule.max || '',
+    rule.enabled ? 'ligada' : 'desligada',
+  ];
+  return parts.join(' ').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+}
+
+function matchesSearch(rule) {
+  if (!ruleSearch) return true;
+  const text = searchTextOf(rule);
+  // Vários termos: todos precisam aparecer ("bits ctrl").
+  return ruleSearch.split(/\s+/).every((term) => text.includes(term));
+}
+
 function renderRules() {
   const list = $('#rules-list');
   const ids = new Set(state.rules.map((r) => r.id));
@@ -295,7 +322,17 @@ function renderRules() {
     }
     if (list.children[index] !== els.root) list.insertBefore(els.root, list.children[index] || null);
     updateRuleRow(els, rule);
+    els.root.hidden = !matchesSearch(rule);
   });
+  const hidden = state.rules.filter((r) => !matchesSearch(r)).length;
+  const shown = state.rules.length - hidden;
+  const note = $('#rules-filtered');
+  note.hidden = !ruleSearch;
+  note.textContent = ruleSearch
+    ? shown
+      ? `Mostrando ${shown} de ${state.rules.length} ${state.rules.length === 1 ? 'regra' : 'regras'}.`
+      : 'Nenhuma regra com esse texto.'
+    : '';
   $('#rules-empty').hidden = state.rules.length > 0;
 }
 
@@ -804,9 +841,21 @@ $('#update-open').addEventListener('click', () =>
 );
 $('#update-dismiss').addEventListener('click', () => act('dismissUpdate'));
 $('#refresh-rewards').addEventListener('click', () => act('refreshRewards'));
+$('#open-data').addEventListener('click', () => act('openDataFolder'));
+$('#rules-search').addEventListener('input', (e) => {
+  ruleSearch = e.target.value.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+  renderRules();
+});
 $('#add-rule').addEventListener('click', async () => {
   const rule = await act('addRule');
   if (rule) {
+    // A regra nova está vazia e não casaria com o filtro: some o filtro,
+    // senão o clique em "+ Nova regra" pareceria não ter feito nada.
+    if (ruleSearch) {
+      ruleSearch = '';
+      $('#rules-search').value = '';
+      renderRules();
+    }
     await sleep(0);
     const els = ruleEls.get(rule.id);
     if (els) {

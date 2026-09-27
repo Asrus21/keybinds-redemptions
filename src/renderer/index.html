@@ -67,6 +67,10 @@
               <span>Abrir junto com o Windows (já na bandeja)</span>
             </label>
             <p class="meta" id="meta-line"></p>
+            <div class="btn-row">
+              <button id="open-data" type="button" class="btn small ghost"
+                title="Onde ficam o config.json e as cópias de segurança">Abrir pasta do app</button>
+            </div>
           </section>
         </div>
 
@@ -75,11 +79,14 @@
             <div class="card-head">
               <h2>Eventos → teclas</h2>
               <div class="row-actions">
+                <input id="rules-search" class="input search" type="search" placeholder="Filtrar regras…"
+                  aria-label="Filtrar regras" autocomplete="off" spellcheck="false" />
                 <button id="refresh-rewards" type="button" class="btn ghost">Atualizar recompensas</button>
                 <button id="add-rule" type="button" class="btn primary">+ Nova regra</button>
               </div>
             </div>
             <p class="hint" id="rewards-status"></p>
+            <p class="hint" id="rules-filtered" hidden></p>
             <div id="rules-list" class="rules"></div>
             <div id="rules-empty" class="empty">
               <p>
