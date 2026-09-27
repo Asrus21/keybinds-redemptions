@@ -340,18 +340,34 @@ class PixggSource extends Source {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Accept: 'application/json',
+        'User-Agent': 'KeybindsRedemptions (+https://github.com/Asrus21/keybinds-redemptions)',
         'X-Client-Id': this.clientId,
         'X-Client-Secret': this.clientSecret,
       },
       body: JSON.stringify({ webhookUrl: this.relayUrl }),
     });
+    if (res.ok) {
+      this.registered = true;
+      return;
+    }
+    // O texto da resposta vai junto no aviso: é o que diz se foi a
+    // credencial, a permissão da aplicação ou um bloqueio do site.
+    let body = '';
+    try {
+      body = (await res.text()).replace(/\s+/g, ' ').trim().slice(0, 200);
+    } catch {}
+    const detail = `HTTP ${res.status}${body ? ` — ${body}` : ''}`;
     if (res.status === 401 || res.status === 403) {
-      const err = new Error('O PixGG recusou o Client ID/Client Secret.');
+      const err = new Error(
+        res.status === 401
+          ? `O PixGG recusou o Client ID/Client Secret (${detail}).`
+          : `O PixGG negou o acesso (${detail}). Confira se a aplicação está ativa e se o Client Secret é o atual.`
+      );
       err.fatal = true;
       throw err;
     }
-    if (!res.ok) throw new Error(`PixGG respondeu ${res.status} ao cadastrar o webhook.`);
-    this.registered = true;
+    throw new Error(`PixGG respondeu ao cadastrar o webhook: ${detail}.`);
   }
 
   async poll() {

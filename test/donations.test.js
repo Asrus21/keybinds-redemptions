@@ -331,6 +331,23 @@ test('PixGG: credencial recusada vira erro e para', async (t) => {
   src.start();
   const [, detail] = await err;
   assert.match(detail, /PixGG recusou/);
+  assert.match(detail, /HTTP 401/, 'o código da resposta aparece no aviso');
   await new Promise((r) => setTimeout(r, 40));
   assert.equal(px.calls.length, 1);
+});
+
+test('PixGG: 403 mostra o texto da resposta (pode ser permissão ou bloqueio do site)', async (t) => {
+  const { PixggSource } = require('../src/main/donations/sources');
+  const seen = [];
+  const fetch = async (url, init) => {
+    seen.push(init.headers);
+    return new Response('<html>Access denied | Cloudflare</html>', { status: 403 });
+  };
+  const src = new PixggSource({ clientId: 'x', clientSecret: 's', fetch, intervalMs: 10 });
+  t.after(() => src.stop());
+  const err = waitFor(src, 'status', (s) => s === 'error');
+  src.start();
+  const [, detail] = await err;
+  assert.match(detail, /negou o acesso \(HTTP 403 — <html>Access denied \| Cloudflare<\/html>\)/);
+  assert.match(seen[0]['User-Agent'], /KeybindsRedemptions/);
 });
