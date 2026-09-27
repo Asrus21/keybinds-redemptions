@@ -47,10 +47,16 @@ jobs:
       # Roda de novo no Windows: aqui o teste da user32.dll de verdade vale.
       - run: npm test
       - run: npx electron-builder --win --x64 --publish never
+      # Sem o latest.yml a atualização automática não acha a versão nova.
+      - name: Conferir latest.yml
+        shell: bash
+        run: test -f dist/latest.yml && cat dist/latest.yml && ls -l dist/*.blockmap
       - uses: actions/upload-artifact@v4
         with:
           name: keybinds-redemptions-windows
-          path: dist/*.exe
+          path: |
+            dist/*.exe
+            dist/latest.yml
           if-no-files-found: error
       - name: Publicar release
         if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release != '' && github.ref == 'refs/heads/main')
@@ -69,9 +75,13 @@ jobs:
           if [ "$TAG" != "v$version" ]; then
             echo "A tag $TAG não bate com a versão do package.json ($version)"; exit 1
           fi
+          # latest.yml e o .blockmap são o que a atualização automática do
+          # app instalado lê (electron-updater): sem eles, o app só avisa.
+          test -f dist/latest.yml || { echo "dist/latest.yml não foi gerado"; exit 1; }
+          files=(dist/*.exe dist/latest.yml dist/*.exe.blockmap)
           notes="release-notes/$TAG.md"
           if [ -f "$notes" ]; then
-            gh release create "$TAG" dist/*.exe --target "$GITHUB_SHA" --title "Keybinds Redemptions $TAG" --notes-file "$notes"
+            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "Keybinds Redemptions $TAG" --notes-file "$notes"
           else
-            gh release create "$TAG" dist/*.exe --target "$GITHUB_SHA" --title "Keybinds Redemptions $TAG" --generate-notes
+            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" --title "Keybinds Redemptions $TAG" --generate-notes
           fi

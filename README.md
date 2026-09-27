@@ -98,11 +98,13 @@ Pontos de canal, bits e subs só existem em canais **Afiliados ou Parceiros**.
 ## No dia a dia
 
 - **Pausar**: os eventos continuam aparecendo na atividade, mas nenhuma tecla é apertada. Bom para menus, cutscenes e pausas.
-- **Parar tudo**: interrompe o que estiver rodando, esvazia a fila e **solta todas as teclas**. Use quando alguém resgatar “segurar W por 30 s” na hora errada.
+- **Parar tudo**: interrompe o que estiver rodando, esvazia a fila, cancela um **Testar** que ainda esteja na contagem e **solta todas as teclas**. Use quando alguém resgatar “segurar W por 30 s” na hora errada.
 - Os eventos entram numa **fila** e rodam um de cada vez, para dois “segura W” não se atropelarem.
 - Fechar a janela deixa o app rodando **na bandeja**, perto do relógio. Para sair de vez, clique com o botão direito no ícone e escolha **Sair**. Pausar e Parar tudo também estão nesse menu.
 - **Abrir junto com o Windows** já inicia o app na bandeja.
-- **Versão nova:** o app confere no GitHub ao abrir e a cada 6 horas. Quando sai uma versão nova, aparece um aviso no topo com o botão **Baixar**. Ele não atualiza sozinho: você instala quando quiser, fora da live.
+- **Versão nova:** o app confere no GitHub ao abrir e a cada 6 horas.
+  - **App instalado** (pelo `Setup`): ele baixa a versão nova sozinho, em segundo plano, e só depois mostra o aviso **Reiniciar agora**. Clicou, o app fecha, instala e abre de novo, com as regras e o login intactos. Escolheu **Depois**: a instalação acontece quando você fechar o app pela bandeja. Nada é instalado no meio da live sem você mandar.
+  - **App portátil**: aparece o aviso com o botão **Baixar**, que abre a página da versão nova.
 
 ### Dica para o OBS
 
@@ -125,7 +127,7 @@ As teclas **F13 a F24** não existem no teclado comum, então nenhum jogo usa. C
 
 - Os tokens da Twitch ficam em `%APPDATA%\Keybinds Redemptions\tokens.bin`, e os dos serviços de doação em `donations.bin`, **cifrados pelo Windows (DPAPI)**. Só o seu usuário do Windows consegue ler.
 - As regras e as preferências ficam em `config.json`, na mesma pasta.
-- Para saber se há versão nova, o app lê só o release mais recente em `api.github.com`, sem mandar dado nenhum.
+- Para saber se há versão nova, o app lê só o release mais recente em `api.github.com`, sem mandar dado nenhum. A atualização é baixada do próprio release no `github.com`.
 - O app só se comunica com a Twitch (`id.twitch.tv`, `api.twitch.tv` e `eventsub.wss.twitch.tv`) e com os serviços de doação que você conectar (`realtime.streamelements.com`, `sockets.streamlabs.com`, `oauth.livepix.gg`, `api.livepix.gg`, `app.pixgg.com` e o repasse em `asrus.app`). Ele não envia nada para nenhum outro lugar.
 - As mensagens que os viewers mandam (no resgate, no cheer ou na doação) são ignoradas. A tecla é escolhida só pelo tipo de evento e pelo valor, então ninguém do chat consegue fazer o app apertar outra coisa.
 
@@ -148,6 +150,8 @@ O instalador é gerado pelo GitHub Actions (`.github/workflows/build.yml`) em to
    - pelo terminal: `git tag v0.2.0 && git push origin v0.2.0`.
 
 A tag precisa bater com a versão do `package.json`, senão o workflow recusa.
+
+Junto dos `.exe`, a Release leva o `latest.yml` e o `.blockmap` do instalador. É deles que a atualização automática (`electron-updater`, em `src/main/autoupdate.js`) tira a versão, o arquivo e o hash. Uma Release sem eles faz o app instalado voltar ao aviso com o link.
 
 Há duas formas de não precisar colar o Client ID na tela:
 

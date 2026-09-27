@@ -1,7 +1,7 @@
 {
   "name": "keybinds-redemptions",
   "productName": "Keybinds Redemptions",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Aperta uma tecla no PC do streamer em resgates, bits, subs, gift subs e doações da live.",
   "author": "Thiago Arruda <tarruda1513@gmail.com>",
   "private": true,
@@ -13,6 +13,7 @@
     "dist": "electron-builder --win --publish never"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "koffi": "2.16.3",
     "ws": "^8.21.3"
   },
@@ -33,6 +34,13 @@
       "package.json",
       "!node_modules/koffi/build/koffi/{darwin,freebsd,linux,musl,openbsd}_*/**",
       "!node_modules/koffi/{src,vendor,doc}/**"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Asrus21",
+        "repo": "keybinds-redemptions"
+      }
     ],
     "win": {
       "target": [

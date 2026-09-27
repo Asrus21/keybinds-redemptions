@@ -88,10 +88,19 @@ function renderTop() {
   $('#notice-text').textContent = state.notice;
   $('#paused-banner').hidden = !state.paused;
 
-  $('#update-banner').hidden = !state.update;
-  $('#update-text').textContent = state.update
-    ? `Nova versão ${state.update.version} disponível (você está na ${version}).`
-    : '';
+  // Enquanto baixa, nada de aviso: ele só aparece quando dá para reiniciar
+  // (ou, sem atualização automática, com o link da release).
+  const up = state.update;
+  const ready = !!up && up.stage === 'ready';
+  $('#update-banner').hidden = !up || up.stage === 'downloading';
+  $('#update-text').textContent = !up
+    ? ''
+    : ready
+      ? `A versão ${up.version} já foi baixada. Reinicie o app para concluir a instalação.`
+      : `Nova versão ${up.version} disponível (você está na ${version}).`;
+  $('#update-open').textContent = ready ? 'Reiniciar agora' : 'Baixar';
+  $('#update-dismiss').textContent = ready ? 'Depois' : 'Agora não';
+  $('#update-dismiss').title = ready ? 'A atualização é instalada quando você fechar o app.' : '';
 
   const sim = $('#sim-banner');
   sim.hidden = !state.keyboard.simulated;
@@ -505,12 +514,14 @@ async function runTest(id, els) {
   if (els.testing) return;
   els.testing = true;
   els.test.disabled = true;
-  const done = act('testRule', id);
-  for (let n = 3; n > 0; n--) {
+  let finished = false;
+  const done = act('testRule', id).finally(() => (finished = true));
+  // Para a contagem na hora se o "Parar tudo" cancelar o teste.
+  for (let n = 3; n > 0 && !finished; n--) {
     els.test.textContent = `Volte para o jogo… ${n}`;
-    await sleep(1000);
+    await Promise.race([sleep(1000), done]);
   }
-  els.test.textContent = 'Apertando…';
+  if (!finished) els.test.textContent = 'Apertando…';
   await done;
   els.testing = false;
   els.test.textContent = 'Testar';
@@ -687,7 +698,11 @@ function renderDonations() {
   // Não refaz enquanto o streamer digita um token.
   const key = JSON.stringify([state.donations, [...openSources]]);
   if (key === donationsKey) return;
-  const typing = document.activeElement && document.activeElement.closest && document.activeElement.closest('#donations-list');
+  // Só campo editável conta como "digitando". Botão clicado (Desconectar,
+  // Copiar…) também fica com o foco, e antes isso segurava a tela até o
+  // streamer clicar em outro lugar.
+  const active = document.activeElement;
+  const typing = active && active.matches && active.matches('#donations-list input:not([readonly])');
   if (typing) return;
   donationsKey = key;
   $('#donations-list').replaceChildren(...state.donations.map(sourceView));
@@ -765,7 +780,9 @@ function sourceView(src) {
 function renderSettings() {
   $('#set-tray').checked = !!state.settings.closeToTray;
   $('#set-login').checked = !!state.settings.openAtLogin;
-  $('#meta-line').textContent = `Versão ${version} · Teclas: ${state.keyboard.name}`;
+  const up = state.update;
+  const downloading = up && up.stage === 'downloading' ? ` · Baixando a ${up.version}… ${up.percent || 0}%` : '';
+  $('#meta-line').textContent = `Versão ${version}${downloading} · Teclas: ${state.keyboard.name}`;
 }
 
 $('#set-tray').addEventListener('change', (e) => act('updateSettings', { closeToTray: e.target.checked }));
@@ -774,9 +791,15 @@ $('#set-login').addEventListener('change', (e) => act('updateSettings', { openAt
 // ------------------------------------------------------------------ ligação
 
 $('#pause-btn').addEventListener('click', () => act('setPaused', !state.paused));
-$('#stop-btn').addEventListener('click', () => act('stopAll'));
+$('#stop-btn').addEventListener('click', async () => {
+  const n = await act('stopAll');
+  if (n === undefined) return;
+  toast(n ? `Parado: ${n} ${n === 1 ? 'ação interrompida' : 'ações interrompidas'}. Teclas soltas.` : 'Nada estava rodando. Teclas soltas por garantia.');
+});
 $('#notice-close').addEventListener('click', () => act('dismissNotice'));
-$('#update-open').addEventListener('click', () => act('openUpdate'));
+$('#update-open').addEventListener('click', () =>
+  act(state.update && state.update.stage === 'ready' ? 'installUpdate' : 'openUpdate')
+);
 $('#update-dismiss').addEventListener('click', () => act('dismissUpdate'));
 $('#refresh-rewards').addEventListener('click', () => act('refreshRewards'));
 $('#add-rule').addEventListener('click', async () => {

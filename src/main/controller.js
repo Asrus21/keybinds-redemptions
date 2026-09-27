@@ -62,7 +62,10 @@ class Controller extends EventEmitter {
    *   donationDeps?: object,
    *   appVersion?: string,
    *   updateUrl?: string,
+   *   installer?: (import('node:events').EventEmitter & { download(): Promise<string>, install(): void }) | null,
    * }} opts
+   *   `installer` (ver autoupdate.js) baixa e instala a versão nova por dentro
+   *   do app. Sem ele (portátil, fora do Windows), o aviso leva para a release.
    */
   constructor({
     store,
@@ -77,6 +80,7 @@ class Controller extends EventEmitter {
     donationDeps,
     appVersion = '',
     updateUrl,
+    installer = null,
   }) {
     super();
     this.store = store;
@@ -94,8 +98,21 @@ class Controller extends EventEmitter {
 
     this.appVersion = appVersion;
     this.updateUrl = updateUrl;
-    this.update = null; // { version, url } quando há release mais novo
+    // Release mais novo: { version, url, stage, percent }. stage:
+    //   'available'   — aviso com o link (sem instalador, ou o download falhou)
+    //   'downloading' — baixando em segundo plano, sem aviso na tela
+    //   'ready'       — baixado: aviso para reiniciar e concluir
+    this.update = null;
     this.updateTimer = null;
+    this.installer = installer;
+    if (installer) {
+      installer.on('progress', (percent) => {
+        if (!this.update || this.update.stage !== 'downloading') return;
+        this.update.percent = percent;
+        this.changed();
+      });
+    }
+    this.pendingTests = new Set(); // "Testar" ainda na contagem
 
     this.donations = new DonationHub({ deps: donationDeps });
     this.donations.on('change', () => this.changed());
@@ -637,8 +654,33 @@ class Controller extends EventEmitter {
   async testRule(id) {
     const rule = this.findRule(id);
     if (!rule.keys.length) throw new Error('Escolha uma tecla antes de testar.');
-    await new Promise((r) => setTimeout(r, this.testDelayMs));
-    return this.run(rule, { kind: 'test', target: describeTrigger(rule) });
+    // O "Parar tudo" também cancela um teste que ainda está na contagem.
+    const go = await new Promise((resolve) => {
+      const item = {
+        resolve,
+        timer: setTimeout(() => {
+          this.pendingTests.delete(item);
+          resolve(true);
+        }, this.testDelayMs),
+      };
+      this.pendingTests.add(item);
+    });
+    const base = { kind: 'test', target: describeTrigger(rule) };
+    if (!go) {
+      this.addLog({ ...base, ruleId: rule.id, keys: rule.keys, outcome: 'aborted' });
+      return { ok: false, aborted: true };
+    }
+    return this.run(rule, base);
+  }
+
+  cancelTests() {
+    const n = this.pendingTests.size;
+    for (const item of this.pendingTests) {
+      clearTimeout(item.timer);
+      item.resolve(false);
+    }
+    this.pendingTests.clear();
+    return n;
   }
 
   // ---------------------------------------------------------------- controles
@@ -650,10 +692,12 @@ class Controller extends EventEmitter {
     this.changed();
   }
 
+  /** Devolve quantas ações (e testes na contagem) foram interrompidas. */
   stopAll() {
-    const n = this.runner.abortAll();
+    const n = this.runner.abortAll() + this.cancelTests();
     if (n) this.info(`Parado: ${n} ${n === 1 ? 'ação interrompida' : 'ações interrompidas'} e teclas soltas.`);
     this.changed();
+    return n;
   }
 
   // ---------------------------------------------------------------- doações
@@ -693,14 +737,57 @@ class Controller extends EventEmitter {
       fetch: this.fetch,
       ...(this.updateUrl ? { url: this.updateUrl } : {}),
     });
-    const changed = (found && found.version) !== (this.update && this.update.version);
-    this.update = found;
-    if (found && changed) this.info(`Versão ${found.version} disponível para download.`);
+    if (!found) {
+      // Só some o aviso de link; um download em andamento ou pronto fica.
+      if (this.update && this.update.stage === 'available') this.update = null;
+      this.changed();
+      return null;
+    }
+    if (this.update && this.update.stage === 'downloading') return this.update; // termina o que começou
+    const same = this.update && this.update.version === found.version;
+    // Mesma versão: só tenta baixar de novo se o download anterior falhou.
+    if (same && !(this.installer && this.update.stage === 'available')) return this.update;
+
+    if (!this.installer) {
+      this.update = { ...found, stage: 'available', percent: 0 };
+      this.info(`Versão ${found.version} disponível para download.`);
+    } else {
+      this.update = { ...found, stage: 'downloading', percent: 0 };
+      if (!same) this.info(`Baixando a versão ${found.version}…`);
+      this.downloadUpdate(this.update);
+    }
     this.changed();
-    return found;
+    return this.update;
   }
 
-  /** "Agora não": esconde o aviso desta versão (volta se sair outra). */
+  async downloadUpdate(update) {
+    try {
+      const version = await this.installer.download();
+      if (this.update !== update) return;
+      // Normalmente é a mesma; se saiu outra no meio, vale a que baixou.
+      update.version = version || update.version;
+      update.stage = 'ready';
+      update.percent = 100;
+      this.info(`Versão ${update.version} baixada. Reinicie o app para concluir a instalação.`);
+    } catch (err) {
+      if (this.update !== update) return;
+      // Sem download automático: volta para o aviso com o link da release.
+      update.stage = 'available';
+      this.error(`Não deu para baixar a atualização (${err.message}). Baixe pelo link do aviso.`);
+    }
+    this.changed();
+  }
+
+  /** "Reiniciar agora": fecha, instala a versão baixada e abre de novo. */
+  installUpdate() {
+    if (!this.installer || !this.update || this.update.stage !== 'ready') {
+      throw new Error('Nenhuma atualização baixada para instalar.');
+    }
+    this.info(`Instalando a versão ${this.update.version}…`);
+    this.installer.install();
+  }
+
+  /** "Agora não"/"Depois": esconde o aviso desta versão (volta se sair outra). */
   dismissUpdate() {
     if (!this.update) return;
     this.config.settings.dismissedUpdate = this.update.version;
@@ -722,6 +809,7 @@ class Controller extends EventEmitter {
     clearTimeout(this.retryTimer);
     clearInterval(this.validateTimer);
     clearInterval(this.updateTimer);
+    this.cancelTests();
     this.cancelLogin();
     if (this.eventsub) this.eventsub.stop();
     this.donations.stopAll();

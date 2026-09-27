@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 
 const { checkForUpdate, isNewer } = require('../src/main/updates');
+const { EventEmitter } = require('node:events');
 const { Controller } = require('../src/main/controller');
 const { Store } = require('../src/main/store');
 const { createSimulatedKeyboard } = require('../src/main/keyboard');
@@ -64,7 +65,7 @@ test('o aviso aparece, "Agora não" esconde esta versão e uma mais nova volta a
   t.after(() => ctrl.dispose());
   await ctrl.init();
   await ctrl.checkUpdates();
-  assert.deepEqual(ctrl.snapshot().update, { version: '0.3.0', url: RELEASE.html_url });
+  assert.deepEqual(ctrl.snapshot().update, { version: '0.3.0', url: RELEASE.html_url, stage: 'available', percent: 0 });
 
   ctrl.dismissUpdate();
   assert.equal(ctrl.snapshot().update, null);
@@ -79,4 +80,77 @@ test('o aviso aparece, "Agora não" esconde esta versão e uma mais nova volta a
   release = { ...RELEASE, tag_name: 'v0.4.0', html_url: RELEASE.html_url.replace('0.3.0', '0.4.0') };
   await again.checkUpdates();
   assert.equal(again.snapshot().update.version, '0.4.0');
+});
+
+// Instalador de mentira: o teste decide quando o download termina ou falha.
+function fakeInstaller() {
+  const inst = new EventEmitter();
+  inst.downloads = 0;
+  inst.installs = 0;
+  inst.download = () => {
+    inst.downloads++;
+    return new Promise((resolve, reject) => {
+      inst.finish = resolve;
+      inst.fail = reject;
+    });
+  };
+  inst.install = () => inst.installs++;
+  return inst;
+}
+
+test('app instalado: baixa sozinho, sem aviso até terminar, e aí pede para reiniciar', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-upd-'));
+  const fetch = async () => new Response(JSON.stringify(RELEASE), { status: 200 });
+  const installer = fakeInstaller();
+  const ctrl = new Controller({
+    store: new Store({ dir }),
+    keyboard: createSimulatedKeyboard(),
+    fetch,
+    appVersion: '0.2.0',
+    installer,
+  });
+  t.after(() => ctrl.dispose());
+  await ctrl.init();
+  await ctrl.checkUpdates();
+  assert.equal(installer.downloads, 1, 'um download só, mesmo com duas verificações');
+  assert.equal(ctrl.snapshot().update.stage, 'downloading');
+  assert.throws(() => ctrl.installUpdate(), /Nenhuma atualização baixada/);
+
+  installer.emit('progress', 42);
+  assert.equal(ctrl.snapshot().update.percent, 42);
+
+  installer.finish('0.3.0');
+  await new Promise((r) => setImmediate(r));
+  assert.equal(ctrl.snapshot().update.stage, 'ready');
+  ctrl.installUpdate();
+  assert.equal(installer.installs, 1);
+
+  // Verificar de novo não recomeça o download de uma versão já baixada.
+  await ctrl.checkUpdates();
+  assert.equal(installer.downloads, 1);
+});
+
+test('download automático falhou: volta para o aviso com link e tenta de novo depois', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-upd-'));
+  const fetch = async () => new Response(JSON.stringify(RELEASE), { status: 200 });
+  const installer = fakeInstaller();
+  const ctrl = new Controller({
+    store: new Store({ dir }),
+    keyboard: createSimulatedKeyboard(),
+    fetch,
+    appVersion: '0.2.0',
+    installer,
+  });
+  t.after(() => ctrl.dispose());
+  await ctrl.init();
+  while (!installer.fail) await new Promise((r) => setImmediate(r)); // a verificação do init é em segundo plano
+  installer.fail(new Error('sem latest.yml'));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(ctrl.snapshot().update.stage, 'available');
+  assert.equal(ctrl.snapshot().update.url, RELEASE.html_url);
+  assert.ok(ctrl.getLog().some((e) => /Não deu para baixar a atualização/.test(e.text || '')));
+
+  await ctrl.checkUpdates();
+  assert.equal(installer.downloads, 2);
+  assert.equal(ctrl.snapshot().update.stage, 'downloading');
 });
