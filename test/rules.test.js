@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { normalizeRule, patchRule, matchRules, describeTrigger } = require('../src/main/rules');
+const { normalizeRule, patchRule, matchRules, describeTrigger, isRunnable } = require('../src/main/rules');
 
 function rule(fields) {
   return normalizeRule({ keys: ['KeyG'], ...fields });
@@ -78,4 +78,92 @@ test('descrição curta do gatilho (vai para o registro do "Testar")', () => {
   assert.equal(describeTrigger(rule({ trigger: 'sub', tier: '2000' })), 'Sub (Tier 2)');
   assert.match(describeTrigger(rule({ trigger: 'donation', min: 10 })), /^Doação: 10,00 ou mais \(qualquer serviço\)$/);
   assert.equal(describeTrigger(rule({ trigger: 'reward', rewardTitle: 'Pular' })), 'Pular');
+});
+
+test('comando do chat: primeira palavra, sem maiúscula e com nível mínimo', () => {
+  const mk = (o) => normalizeRule({ enabled: true, keys: ['KeyG'], trigger: 'command', ...o });
+  // O campo guarda só a primeira palavra, em minúsculas.
+  assert.equal(mk({ command: '  !SOM  alto ' }).command, '!som');
+  assert.equal(mk({ command: '' }).command, '');
+  assert.equal(mk({}).who, 'all', 'padrão é todo mundo');
+  assert.equal(mk({ who: 'inventado' }).who, 'all');
+
+  // Sem comando a regra não roda, mesmo com tecla escolhida.
+  assert.equal(isRunnable(mk({ command: '' })), false);
+  assert.equal(isRunnable(mk({ command: '!som' })), true);
+
+  const rules = [mk({ command: '!som', who: 'all' }), mk({ command: '!clip', who: 'mod' })];
+  const hit = (command, level) => matchRules(rules, { kind: 'command', command, level }).map((r) => r.command);
+  assert.deepEqual(hit('!som', 0), ['!som']);
+  assert.deepEqual(hit('!clip', 0), [], 'viewer não usa comando de mod');
+  assert.deepEqual(hit('!clip', 2), [], 'VIP ainda não é mod');
+  assert.deepEqual(hit('!clip', 3), ['!clip']);
+  assert.deepEqual(hit('!outro', 3), []);
+
+  // A escada: quem está acima também pode.
+  const soSub = [mk({ command: '!x', who: 'sub' })];
+  assert.equal(matchRules(soSub, { kind: 'command', command: '!x', level: 0 }).length, 0);
+  for (const level of [1, 2, 3]) {
+    assert.equal(matchRules(soSub, { kind: 'command', command: '!x', level }).length, 1, `nível ${level}`);
+  }
+});
+
+test('trocar para comando e voltar não deixa lixo na faixa', () => {
+  const bits = normalizeRule({ trigger: 'bits', min: 500, keys: ['KeyG'] });
+  const cmd = patchRule(bits, { trigger: 'command' });
+  assert.equal(cmd.min, 0, 'faixa de bits não vale para comando');
+  const back = patchRule(cmd, { trigger: 'bits' });
+  assert.equal(back.min, 100, 'volta para o padrão de bits');
+});
+
+test('sequência de passos: migração do formato antigo e limpeza', () => {
+  // Regra salva antes dos passos existirem: a tecla vira um passo só.
+  const velha = normalizeRule({ keys: ['ControlLeft', 'KeyG'], holdMs: 80, gapMs: 250, repeat: 3 });
+  assert.deepEqual(velha.steps, [
+    { kind: 'keys', keys: ['ControlLeft', 'KeyG'], text: '', holdMs: 80, gapMs: 250 },
+  ]);
+  assert.equal(velha.repeat, 3);
+  assert.equal(normalizeRule({ keys: [] }).steps.length, 0, 'regra nova nasce sem passo');
+
+  // Passo sem tecla (ou sem caminho) não faz nada: sai da lista.
+  const limpa = normalizeRule({
+    steps: [
+      { kind: 'keys', keys: ['KeyA'] },
+      { kind: 'keys', keys: [] },
+      { kind: 'url', text: '' },
+      { kind: 'open', text: 'C:\\x.bat' },
+      { kind: 'inventado', keys: ['KeyB'] },
+    ],
+  });
+  assert.deepEqual(limpa.steps.map((s) => s.kind), ['keys', 'open', 'keys']);
+  assert.equal(limpa.steps[1].keys.length, 0, 'passo de abrir não guarda tecla');
+  assert.equal(limpa.steps[0].text, '', 'passo de tecla não guarda texto');
+
+  // Sem passo nenhum a regra não roda; com um passo de link, roda.
+  assert.equal(isRunnable(normalizeRule({ enabled: true, trigger: 'sub', steps: [] })), false);
+  assert.equal(
+    isRunnable(normalizeRule({ enabled: true, trigger: 'sub', steps: [{ kind: 'url', text: 'https://x' }] })),
+    true,
+    'uma regra pode só abrir um link, sem tecla nenhuma'
+  );
+});
+
+test('atalho `keys` no patch vale para um passo, mas não apaga uma sequência', () => {
+  const uma = normalizeRule({ keys: ['KeyA'], holdMs: 30 });
+  const trocada = patchRule(uma, { keys: ['KeyB'] });
+  assert.deepEqual(trocada.steps.map((s) => s.keys), [['KeyB']]);
+  assert.equal(trocada.steps[0].holdMs, 30, 'o tempo do passo continua');
+
+  const sequencia = normalizeRule({
+    steps: [{ kind: 'keys', keys: ['KeyA'] }, { kind: 'keys', keys: ['KeyB'] }],
+  });
+  const tentativa = patchRule(sequencia, { holdMs: 999 });
+  assert.equal(tentativa.steps.length, 2, 'um "segurar" solto não colapsa a sequência');
+  const explicita = patchRule(sequencia, { steps: [{ kind: 'keys', keys: ['KeyC'] }] });
+  assert.equal(explicita.steps.length, 1, 'mandando steps, troca de verdade');
+});
+
+test('a regra guarda no máximo 20 passos', () => {
+  const muitos = Array.from({ length: 30 }, () => ({ kind: 'keys', keys: ['KeyA'] }));
+  assert.equal(normalizeRule({ steps: muitos }).steps.length, 20);
 });

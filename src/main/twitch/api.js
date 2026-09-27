@@ -148,12 +148,17 @@ class TwitchApi {
   }
 
   /** Liga a sessão da EventSub (WebSocket) a um tipo de evento do canal. */
-  async subscribeEvent(type, version, sessionId, broadcasterId) {
+  /**
+   * @param {object} [extraCondition] campos a mais na `condition`. O
+   *   channel.chat.message pede `user_id` (quem está lendo o chat) além do
+   *   canal; os outros eventos só querem o canal.
+   */
+  async subscribeEvent(type, version, sessionId, broadcasterId, extraCondition) {
     const { data } = await this.helix('POST', '/eventsub/subscriptions', {
       body: {
         type,
         version,
-        condition: { broadcaster_user_id: broadcasterId },
+        condition: { broadcaster_user_id: broadcasterId, ...extraCondition },
         transport: { method: 'websocket', session_id: sessionId },
       },
     });

@@ -1,4 +1,8 @@
-// Fila que aperta as teclas, uma ação de cada vez.
+// Fila que executa as ações das regras, uma de cada vez.
+//
+// Uma ação é uma sequência de passos: apertar uma combinação, abrir um
+// arquivo/programa ou abrir um link, cada um com o seu tempo de espera
+// depois. A sequência inteira pode repetir.
 //
 // Em fila (e não tudo junto) porque dois resgates seguidos de "segura W por 3 s"
 // se atropelariam: o segundo soltaria o W do primeiro no meio. Assim cada
@@ -40,9 +44,18 @@ class ActionRunner extends EventEmitter {
   /**
    * @param {{ keyboard: { keyDown(code: string): void, keyUp(code: string): void }, maxQueue?: number }} opts
    */
-  constructor({ keyboard, maxQueue = 50 }) {
+  /**
+   * @param {{ keyboard: object, effects?: { open(t: string): void, url(t: string): void }, maxQueue?: number }} opts
+   *   `effects` é quem abre arquivo e link (o processo principal); sem ele,
+   *   esses passos só avisam, o que é o caso dos testes.
+   */
+  constructor({ keyboard, effects, maxQueue = 50 }) {
     super();
     this.keyboard = keyboard;
+    this.effects = effects || {
+      open: (t) => this.emit('log', `[simulação] abriria ${t}`),
+      url: (t) => this.emit('log', `[simulação] abriria o link ${t}`),
+    };
     this.maxQueue = maxQueue;
     this.queue = [];
     this.running = null; // { controller }
@@ -117,11 +130,23 @@ class ActionRunner extends EventEmitter {
     this.pump();
   }
 
-  async perform({ keys, holdMs, repeat, gapMs }, signal) {
-    for (let i = 0; i < repeat; i++) {
-      if (i > 0 && gapMs > 0) await sleep(gapMs, signal);
-      await this.pressCombo(keys, holdMs, signal);
+  async perform({ steps, repeat }, signal) {
+    for (let round = 0; round < repeat; round++) {
+      for (const [i, step] of steps.entries()) {
+        await this.runStep(step, signal);
+        // A espera do último passo da última volta só atrasaria a fila.
+        const last = round === repeat - 1 && i === steps.length - 1;
+        if (!last && step.gapMs > 0) await sleep(step.gapMs, signal);
+      }
     }
+  }
+
+  async runStep(step, signal) {
+    if (step.kind === 'keys') return this.pressCombo(step.keys, step.holdMs, signal);
+    // Abrir arquivo ou link não é interrompível nem demora: dispara e segue.
+    if (step.kind === 'open') return this.effects.open(step.text);
+    if (step.kind === 'url') return this.effects.url(step.text);
+    return undefined;
   }
 
   async pressCombo(keys, holdMs, signal) {

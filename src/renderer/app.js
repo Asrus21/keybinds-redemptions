@@ -30,6 +30,17 @@ function h(tag, props, ...children) {
   return el;
 }
 
+/** Resumo curto da sequência: Ctrl+G → 0,5 s → W → abrir link. */
+function stepSummary(steps) {
+  const wrap = h('span', { class: 'chips' });
+  steps.forEach((step, i) => {
+    if (i > 0) wrap.append(h('span', { class: 'plus' }, '→'));
+    if (step.kind === 'keys') wrap.append(...chips(step.keys).childNodes);
+    else wrap.append(h('span', { class: 'step-tag' }, step.kind === 'url' ? 'link' : 'abrir'));
+  });
+  return wrap;
+}
+
 function chips(codes, big = false) {
   const wrap = h('span', { class: big ? 'chips big' : 'chips' });
   codes.forEach((code, i) => {
@@ -290,7 +301,8 @@ function searchTextOf(rule) {
     rule.rewardTitle,
     rule.trigger === 'sub' ? label(TIER_OPTIONS, rule.tier) : '',
     rule.trigger === 'donation' ? label(SOURCE_OPTIONS, rule.source) : '',
-    ...rule.keys.map(labelOf),
+    rule.trigger === 'command' ? `${rule.command} ${label(WHO_OPTIONS, rule.who)}` : '',
+    ...rule.steps.flatMap((s) => (s.kind === 'keys' ? s.keys.map(labelOf) : [s.text])),
     rule.min || '',
     rule.max || '',
     rule.enabled ? 'ligada' : 'desligada',
@@ -352,6 +364,13 @@ const TRIGGER_OPTIONS = [
   ['sub', 'Sub'],
   ['gift', 'Gift sub'],
   ['donation', 'Doação'],
+  ['command', 'Comando'],
+];
+const WHO_OPTIONS = [
+  ['all', 'de todos'],
+  ['sub', 'de subs'],
+  ['vip', 'de VIPs'],
+  ['mod', 'de mods'],
 ];
 const TIER_OPTIONS = [
   ['any', 'Qualquer tier'],
@@ -414,16 +433,31 @@ function createRuleRow(id) {
   const source = h('select', { class: 'select', 'aria-label': 'Serviço de doação' }, optionsOf(SOURCE_OPTIONS));
   source.addEventListener('change', () => act('updateRule', id, { source: source.value }));
 
+  // Comando do chat
+  const command = h('input', {
+    class: 'input mono command',
+    placeholder: '!som',
+    'aria-label': 'Comando do chat',
+    maxlength: 30,
+    autocomplete: 'off',
+    spellcheck: 'false',
+  });
+  const saveCommand = () => act('updateRule', id, { command: command.value });
+  command.addEventListener('change', saveCommand);
+  command.addEventListener('keydown', (e) => e.key === 'Enter' && command.blur());
+  const who = h('select', { class: 'select who', 'aria-label': 'Quem pode usar o comando' }, optionsOf(WHO_OPTIONS));
+  who.addEventListener('change', () => act('updateRule', id, { who: who.value }));
+  const commandWrap = h('span', { class: 'command-pick' }, command, who);
+
   // Bits, gift e doação
   const range = rangeField(id);
 
-  const detail = h('div', { class: 'trigger-detail' }, rewardWrap, tier, source, range.wrap);
+  const detail = h('div', { class: 'trigger-detail' }, rewardWrap, tier, source, commandWrap, range.wrap);
 
   const keysBtn = h('button', { class: 'keys-btn', type: 'button', title: 'Escolher a tecla', onclick: () => openKeyDialog(id) });
 
-  const hold = numberField('Segurar', 'ms', 'holdMs', id, { min: 10, max: 60000 });
-  const repeat = numberField('Repetir', '×', 'repeat', id, { min: 1, max: 100 });
-  const gap = numberField('Intervalo', 'ms', 'gapMs', id, { min: 0, max: 10000 });
+  // Segurar e esperar viraram campos de cada passo, dentro do diálogo.
+  const repeat = numberField('Repetir a sequência', '×', 'repeat', id, { min: 1, max: 100 });
 
   const warn = h('span', { class: 'rule-warn' });
   const test = h('button', { class: 'btn small', type: 'button' }, 'Testar');
@@ -433,7 +467,7 @@ function createRuleRow(id) {
   const remove = h('button', { class: 'btn small ghost', type: 'button' }, 'Remover');
   remove.addEventListener('click', () => {
     const rule = state.rules.find((r) => r.id === id);
-    const configured = rule && (rule.rewardId || rule.keys.length || rule.trigger !== 'reward');
+    const configured = rule && (rule.rewardId || rule.steps.length || rule.trigger !== 'reward');
     if (configured && !window.confirm('Remover esta regra?')) return;
     act('removeRule', id);
   });
@@ -450,7 +484,7 @@ function createRuleRow(id) {
       h('span', { class: 'arrow' }, '→'),
       keysBtn
     ),
-    h('div', { class: 'rule-details' }, hold.wrap, repeat.wrap, gap.wrap, warn, h('span', { class: 'spacer' }), test, remove)
+    h('div', { class: 'rule-details' }, repeat.wrap, warn, h('span', { class: 'spacer' }), test, remove)
   );
   return Object.assign(els, {
     root,
@@ -461,11 +495,12 @@ function createRuleRow(id) {
     rewardWrap,
     tier,
     source,
+    command,
+    who,
+    commandWrap,
     range,
     keysBtn,
-    hold,
     repeat,
-    gap,
     warn,
     test,
     rewardsKey: '',
@@ -487,11 +522,14 @@ function updateRuleRow(els, rule) {
   els.rewardWrap.hidden = t !== 'reward';
   els.tier.hidden = t !== 'sub';
   els.source.hidden = t !== 'donation';
+  els.commandWrap.hidden = t !== 'command';
   els.range.wrap.hidden = !RANGE_LABELS[t];
 
   if (t === 'reward') updateRewardPick(els, rule);
   setIfIdle(els.tier, rule.tier);
   setIfIdle(els.source, rule.source);
+  setIfIdle(els.command, rule.command);
+  setIfIdle(els.who, rule.who);
   if (RANGE_LABELS[t]) {
     const [lead, unit] = RANGE_LABELS[t];
     els.range.lead.textContent = lead;
@@ -504,22 +542,18 @@ function updateRuleRow(els, rule) {
   }
 
   els.keysBtn.replaceChildren(
-    rule.keys.length ? chips(rule.keys) : h('span', { class: 'placeholder' }, 'Escolher tecla…')
+    rule.steps.length ? stepSummary(rule.steps) : h('span', { class: 'placeholder' }, 'Escolher o que fazer…')
   );
 
-  for (const [f, field] of [
-    ['holdMs', els.hold],
-    ['repeat', els.repeat],
-    ['gapMs', els.gap],
-  ]) {
-    setIfIdle(field.input, rule[f]);
-  }
-  // Intervalo só faz sentido quando repete.
-  els.gap.wrap.hidden = rule.repeat <= 1;
+  setIfIdle(els.repeat.input, rule.repeat);
 
-  const missing = [t === 'reward' && !rule.rewardId && 'a recompensa', !rule.keys.length && 'a tecla'].filter(Boolean);
+  const missing = [
+    t === 'reward' && !rule.rewardId && 'a recompensa',
+    t === 'command' && !rule.command && 'o comando',
+    !rule.steps.length && 'o que fazer',
+  ].filter(Boolean);
   els.warn.textContent = missing.length ? `Falta escolher ${missing.join(' e ')}.` : '';
-  if (!els.testing) els.test.disabled = !rule.keys.length;
+  if (!els.testing) els.test.disabled = !rule.steps.length;
 }
 
 function updateRewardPick(els, rule) {
@@ -564,7 +598,7 @@ async function runTest(id, els) {
   els.testing = false;
   els.test.textContent = 'Testar';
   const rule = state.rules.find((r) => r.id === id);
-  els.test.disabled = !rule || !rule.keys.length;
+  els.test.disabled = !rule || !rule.steps.length;
 }
 
 function flashRule(ruleId) {
@@ -580,7 +614,99 @@ const dialog = $('#key-dialog');
 const capture = $('#capture');
 let dialogRuleId = null;
 let combo = [];
+let steps = [];
 const pressed = new Set();
+
+const STEP_DEFAULTS = { holdMs: 60, gapMs: 100 };
+
+/** Desenha a lista de passos do diálogo (e os campos de tempo de cada um). */
+function renderSteps() {
+  const list = $('#steps-list');
+  $('#steps-empty').hidden = steps.length > 0;
+  list.replaceChildren(
+    ...steps.map((step, i) => {
+      const corpo =
+        step.kind === 'keys'
+          ? h('span', { class: 'step-keys' }, chips(step.keys))
+          : h('input', {
+              class: 'input mono',
+              value: step.text,
+              placeholder: step.kind === 'url' ? 'https://…' : 'C:\\OBS\\cena.bat',
+              'aria-label': step.kind === 'url' ? 'Link do passo' : 'Arquivo ou programa do passo',
+              spellcheck: 'false',
+              oninput: (e) => (step.text = e.target.value),
+            });
+
+      const hold = h('input', {
+        class: 'input tiny',
+        type: 'number',
+        min: 10,
+        max: 60000,
+        value: step.holdMs,
+        'aria-label': 'Segurar, em milissegundos',
+        oninput: (e) => (step.holdMs = Number(e.target.value)),
+      });
+      const gap = h('input', {
+        class: 'input tiny',
+        type: 'number',
+        min: 0,
+        max: 10000,
+        value: step.gapMs,
+        'aria-label': 'Esperar depois, em milissegundos',
+        oninput: (e) => (step.gapMs = Number(e.target.value)),
+      });
+
+      const mover = (delta) => {
+        const to = i + delta;
+        if (to < 0 || to >= steps.length) return;
+        [steps[i], steps[to]] = [steps[to], steps[i]];
+        renderSteps();
+      };
+
+      return h(
+        'li',
+        { class: 'step' },
+        h('span', { class: 'step-kind' }, { keys: 'Apertar', open: 'Abrir', url: 'Link' }[step.kind]),
+        corpo,
+        h(
+          'span',
+          { class: 'step-times' },
+          // Segurar só vale para tecla: abrir arquivo é instantâneo.
+          step.kind === 'keys' ? h('label', { class: 'step-time' }, 'segurar ', hold, ' ms') : null,
+          // A espera do último passo só atrasa a fila, então nem aparece.
+          i < steps.length - 1 || steps.length === 1
+            ? h('label', { class: 'step-time' }, 'esperar ', gap, ' ms')
+            : null
+        ),
+        h(
+          'span',
+          { class: 'step-move' },
+          h('button', { class: 'icon-btn', type: 'button', title: 'Subir', onclick: () => mover(-1) }, '↑'),
+          h('button', { class: 'icon-btn', type: 'button', title: 'Descer', onclick: () => mover(1) }, '↓'),
+          h(
+            'button',
+            {
+              class: 'icon-btn',
+              type: 'button',
+              title: 'Remover passo',
+              onclick: () => {
+                steps.splice(i, 1);
+                renderSteps();
+              },
+            },
+            '×'
+          )
+        )
+      );
+    })
+  );
+}
+
+function addStep(step) {
+  if (steps.length >= 20) return toast('Uma regra vai até 20 passos.');
+  steps.push({ ...STEP_DEFAULTS, ...step });
+  renderSteps();
+}
 
 function fillKeySelect() {
   const select = $('#key-select');
@@ -597,18 +723,32 @@ function fillKeySelect() {
 function renderCombo(message) {
   $('#capture-keys').replaceChildren(combo.length ? chips(combo, true) : '');
   $('#capture-hint').textContent =
-    message || (combo.length ? 'Solte e clique em “Salvar” — ou aperte outra combinação.' : 'Aperte a tecla ou a combinação agora (ex.: Ctrl + G)');
+    message ||
+    (combo.length
+      ? 'Solte as teclas para virar um passo — ou aperte outra combinação.'
+      : 'Aperte a tecla ou a combinação agora (ex.: Ctrl + G)');
+}
+
+/** Solta as teclas: a combinação capturada vira um passo da sequência. */
+function commitCombo() {
+  if (!combo.length) return;
+  addStep({ kind: 'keys', keys: combo });
+  combo = [];
+  renderCombo();
 }
 
 function openKeyDialog(id) {
   const rule = state.rules.find((r) => r.id === id);
   if (!rule) return;
   dialogRuleId = id;
-  combo = [...rule.keys];
+  combo = [];
+  // Cópia: mexer aqui só vale se o streamer clicar em Salvar.
+  steps = rule.steps.map((s) => ({ ...s, keys: [...s.keys] }));
   pressed.clear();
   $('#key-dialog-reward').textContent = rule.rewardTitle
-    ? `Quando alguém resgatar “${rule.rewardTitle}”.`
-    : 'Escolha a tecla que esta regra vai apertar.';
+    ? `Quando alguém resgatar “${rule.rewardTitle}”, na ordem:`
+    : 'Os passos rodam na ordem da lista.';
+  renderSteps();
   renderCombo();
   dialog.showModal();
   capture.focus();
@@ -638,25 +778,34 @@ capture.addEventListener('keyup', (e) => {
     renderCombo();
   }
   pressed.delete(e.code);
+  // Soltou tudo: fecha a combinação e vira um passo.
+  if (pressed.size === 0) commitCombo();
 });
 
 capture.addEventListener('blur', () => pressed.clear());
 capture.addEventListener('click', () => capture.focus());
 
 $('#key-add').addEventListener('click', () => {
-  combo = normalizeCombo([...combo, $('#key-select').value]);
+  addStep({ kind: 'keys', keys: [$('#key-select').value] });
+  combo = [];
   renderCombo();
 });
+$('#step-open').addEventListener('click', () => addStep({ kind: 'open', text: '' }));
+$('#step-url').addEventListener('click', () => addStep({ kind: 'url', text: '' }));
 $('#key-clear').addEventListener('click', () => {
+  steps = [];
   combo = [];
+  renderSteps();
   renderCombo();
   capture.focus();
 });
 $('#key-cancel').addEventListener('click', () => dialog.close());
 $('#key-save').addEventListener('click', async () => {
   const id = dialogRuleId;
+  commitCombo(); // combinação ainda segurada também conta
+  const salvar = steps;
   dialog.close();
-  if (id) await act('updateRule', id, { keys: combo });
+  if (id) await act('updateRule', id, { steps: salvar });
 });
 
 // ------------------------------------------------------------------ atividade
@@ -687,7 +836,8 @@ function fillLogItem(li, entry) {
     } else {
       what.append('Teste — ', h('span', { class: 'reward' }, entry.target));
     }
-    if (entry.keys && entry.keys.length) what.append(h('span', { class: 'plus' }, '→'), chips(entry.keys));
+    if (entry.steps && entry.steps.length) what.append(h('span', { class: 'plus' }, '→'), stepSummary(entry.steps));
+    else if (entry.keys && entry.keys.length) what.append(h('span', { class: 'plus' }, '→'), chips(entry.keys));
     if (entry.error) what.append(h('span', { class: 'hint bad' }, entry.error));
   } else {
     what.append(entry.text);

@@ -14,9 +14,15 @@
 
 const ID_BASE = 'https://id.twitch.tv/oauth2';
 
-// Só leitura: resgates (e a lista de recompensas), bits e subs. O app não
-// consegue mudar nada no canal.
-const SCOPES = ['channel:read:redemptions', 'bits:read', 'channel:read:subscriptions'];
+// Só leitura: resgates (e a lista de recompensas), bits, subs e as mensagens
+// do chat (para as regras de comando). O app não consegue mudar nada no canal
+// nem mandar mensagem.
+const SCOPES = [
+  'channel:read:redemptions',
+  'bits:read',
+  'channel:read:subscriptions',
+  'user:read:chat',
+];
 
 class TwitchAuthError extends Error {
   constructor(message, status = 0) {

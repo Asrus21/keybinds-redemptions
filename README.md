@@ -50,7 +50,7 @@ O instalador oficial já vem com o Client ID do app da Twitch (campo `twitchClie
 
 </details>
 
-O app só pede permissões de leitura: `channel:read:redemptions` (resgates e lista de recompensas), `bits:read` (bits) e `channel:read:subscriptions` (subs e gift subs). Ele não consegue mexer em nada no seu canal.
+O app só pede permissões de leitura: `channel:read:redemptions` (resgates e lista de recompensas), `bits:read` (bits), `channel:read:subscriptions` (subs e gift subs) e `user:read:chat` (ler o chat, para as regras de comando). Ele não consegue mexer em nada no seu canal, nem mandar mensagem no chat.
 
 Quem usava a versão anterior (só recompensas) precisa **entrar de novo uma vez** para liberar bits e subs; o app avisa.
 
@@ -103,6 +103,9 @@ Pontos de canal, bits e subs só existem em canais **Afiliados ou Parceiros**.
 - **Pausar**: os eventos continuam aparecendo na atividade, mas nenhuma tecla é apertada. Bom para menus, cutscenes e pausas.
 - **Parar tudo**: interrompe o que estiver rodando, esvazia a fila, cancela um **Testar** que ainda esteja na contagem e **solta todas as teclas**. Use quando alguém resgatar “segurar W por 30 s” na hora errada.
 - Os eventos entram numa **fila** e rodam um de cada vez, para dois “segura W” não se atropelarem.
+- **Sequência de passos**: uma regra não faz só uma coisa. Clique no botão da direita e monte a sequência: apertar `Ctrl+G`, esperar 400 ms, apertar `W`, abrir um link. Cada passo tem o seu **segurar** e o seu **esperar depois**, e a sequência inteira pode **repetir**.
+- **Passos que não são tecla**: além de apertar teclas, um passo pode **abrir um arquivo ou programa** (o `.bat` que troca a cena do OBS, por exemplo) ou **abrir um link** no navegador. O caminho e o link são sempre os que **você** escreveu na regra: nada vem do chat nem da doação. Os dois saem pelo Windows, sem linha de comando no meio.
+- **Comandos do chat**: a regra de **Comando** dispara quando alguém digita uma palavra no chat (`!som`). Escolha quem pode usar: todos, subs, VIPs ou mods. O nível vem dos **selos** de quem escreveu, nunca do texto — ninguém vira mod digitando. O comando é sempre a primeira palavra da mensagem; o que vier depois é ignorado, então a mensagem do viewer nunca decide qual tecla é apertada.
 - **Perfis**: cada perfil tem as suas regras, e só as do perfil ativo disparam. Serve para separar por jogo (“Valorant”, “Minecraft”) ou por tipo de live. Dá para **duplicar** um perfil, **exportar** para um `.json` e **importar** o de outra pessoa — o arquivo leva só nome, programas e regras, nunca token nem Client ID.
 - **Trocar de perfil sozinho** (só no Windows): escreva no perfil os programas que o ativam (`valorant.exe, cs2.exe`, ou cole o caminho inteiro do `.exe`). Com a opção ligada, abrir um desses jogos troca o perfil. Programa que nenhum perfil lista não troca nada, então abrir o navegador no meio da live não derruba o seu perfil.
 - **Filtrar regras**: com muitas regras, o campo no topo do cartão procura por tipo de evento, nome da recompensa, tecla, tier, serviço e valor. Vários termos juntos (`bits ctrl`) exigem todos.

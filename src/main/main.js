@@ -43,6 +43,23 @@ function openExternal(url) {
   } catch {}
 }
 
+/**
+ * Link de um passo de regra. Diferente do `openExternal` da tela, aqui não há
+ * lista de sites: o endereço é o que o STREAMER escreveu na regra dele, do
+ * mesmo jeito que o programa que ele manda abrir. Nada vem do chat nem da
+ * doação. Só o esquema é checado, para `file:` ou coisa pior não passar por
+ * aqui em vez de pelo passo de abrir arquivo.
+ */
+function openRuleUrl(url) {
+  try {
+    const u = new URL(url);
+    if (u.protocol === 'https:' || u.protocol === 'http:') shell.openExternal(u.toString());
+    else console.warn(`Link de regra ignorado (só http e https): ${url}`);
+  } catch {
+    console.warn(`Link de regra inválido: ${url}`);
+  }
+}
+
 function showWindow() {
   if (!win) return;
   if (win.isMinimized()) win.restore();
@@ -311,6 +328,12 @@ async function start() {
     appVersion: app.getVersion(),
     installer: createInstaller({ app, log: (m) => console.warn(m) }),
     foreground: createForegroundWatcher({ log: (m) => console.warn(m) }),
+    effects: {
+      // openPath abre com o programa padrão do Windows e não passa por
+      // interpretador de comandos: não existe linha de comando para escapar.
+      open: (target) => shell.openPath(target).then((err) => err && console.warn(err)),
+      url: openRuleUrl,
+    },
   });
 
   controller.load();
