@@ -55,7 +55,7 @@ function createWindow({ hidden }) {
     minHeight: 560,
     show: false,
     title: 'Keybinds Redemptions',
-    backgroundColor: '#07070c',
+    backgroundColor: '#0e0d0b',
     icon: path.join(ASSETS, 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
