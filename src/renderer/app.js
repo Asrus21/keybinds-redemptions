@@ -442,6 +442,7 @@ function setIfIdle(el, value) {
 
 function updateRuleRow(els, rule) {
   els.root.classList.toggle('off', !rule.enabled);
+  els.root.dataset.trigger = rule.trigger; // cor da faixa do tipo de evento
   els.toggle.checked = rule.enabled;
   setIfIdle(els.trigger, rule.trigger);
 
@@ -640,6 +641,7 @@ function timeOf(ms) {
 
 function fillLogItem(li, entry) {
   li.className = entry.kind;
+  if (entry.trigger) li.dataset.trigger = entry.trigger;
   const what = h('div', { class: 'what' });
   if (entry.kind === 'event' || entry.kind === 'test') {
     if (entry.kind === 'event') {
