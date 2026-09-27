@@ -283,7 +283,9 @@ class LivePixSource extends Source {
 // Credenciais: pixgg.com → Aplicações → criar uma aplicação (use uma só para
 // este app: a URL de webhook dela passa a ser a do repasse).
 const PIXGG_API = 'https://app.pixgg.com';
-const PIXGG_RELAY = 'https://asrus.app/api/pixgg/relay/';
+// Direto no www: o apex (asrus.app) só redireciona para ele, e quem manda
+// webhook nem sempre segue redirecionamento de um POST.
+const PIXGG_RELAY = 'https://www.asrus.app/api/pixgg/relay/';
 
 function pixggRoute(clientSecret) {
   return crypto.createHmac('sha256', clientSecret).update('keybinds-redemptions/pixgg-relay').digest('hex');
