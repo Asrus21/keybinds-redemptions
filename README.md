@@ -103,6 +103,8 @@ Pontos de canal, bits e subs só existem em canais **Afiliados ou Parceiros**.
 - **Pausar**: os eventos continuam aparecendo na atividade, mas nenhuma tecla é apertada. Bom para menus, cutscenes e pausas.
 - **Parar tudo**: interrompe o que estiver rodando, esvazia a fila, cancela um **Testar** que ainda esteja na contagem e **solta todas as teclas**. Use quando alguém resgatar “segurar W por 30 s” na hora errada.
 - Os eventos entram numa **fila** e rodam um de cada vez, para dois “segura W” não se atropelarem.
+- **Perfis**: cada perfil tem as suas regras, e só as do perfil ativo disparam. Serve para separar por jogo (“Valorant”, “Minecraft”) ou por tipo de live. Dá para **duplicar** um perfil, **exportar** para um `.json` e **importar** o de outra pessoa — o arquivo leva só nome, programas e regras, nunca token nem Client ID.
+- **Trocar de perfil sozinho** (só no Windows): escreva no perfil os programas que o ativam (`valorant.exe, cs2.exe`, ou cole o caminho inteiro do `.exe`). Com a opção ligada, abrir um desses jogos troca o perfil. Programa que nenhum perfil lista não troca nada, então abrir o navegador no meio da live não derruba o seu perfil.
 - **Filtrar regras**: com muitas regras, o campo no topo do cartão procura por tipo de evento, nome da recompensa, tecla, tier, serviço e valor. Vários termos juntos (`bits ctrl`) exigem todos.
 - Fechar a janela deixa o app rodando **na bandeja**, perto do relógio. Para sair de vez, clique com o botão direito no ícone e escolha **Sair**. Pausar e Parar tudo também estão nesse menu.
 - **Abrir junto com o Windows** já inicia o app na bandeja.
@@ -130,7 +132,7 @@ As teclas **F13 a F24** não existem no teclado comum, então nenhum jogo usa. C
 ## Privacidade
 
 - Os tokens da Twitch ficam em `%APPDATA%\Keybinds Redemptions\tokens.bin`, e os dos serviços de doação em `donations.bin`, **cifrados pelo Windows (DPAPI)**. Só o seu usuário do Windows consegue ler.
-- As regras e as preferências ficam em `config.json`, na mesma pasta. Antes de cada gravação, o conteúdo anterior vai para `backups/` (as 10 cópias mais novas, no máximo uma a cada 5 minutos). Se o `config.json` sumir ou vier corrompido, o app volta sozinho para a cópia mais nova que der para ler e avisa na atividade. O botão **Abrir pasta do app**, em Preferências, leva até lá.
+- Os perfis, as regras e as preferências ficam em `config.json`, na mesma pasta. Antes de cada gravação, o conteúdo anterior vai para `backups/` (as 10 cópias mais novas, no máximo uma a cada 5 minutos). Se o `config.json` sumir ou vier corrompido, o app volta sozinho para a cópia mais nova que der para ler e avisa na atividade. O botão **Abrir pasta do app**, em Preferências, leva até lá.
 - Para saber se há versão nova, o app lê só o release mais recente em `api.github.com`, sem mandar dado nenhum. A atualização é baixada do próprio release no `github.com`.
 - O app só se comunica com a Twitch (`id.twitch.tv`, `api.twitch.tv` e `eventsub.wss.twitch.tv`) e com os serviços de doação que você conectar (`realtime.streamelements.com`, `sockets.streamlabs.com`, `oauth.livepix.gg`, `api.livepix.gg`, `app.pixgg.com` e o repasse em `asrus.app`). Ele não envia nada para nenhum outro lugar.
 - As mensagens que os viewers mandam (no resgate, no cheer ou na doação) são ignoradas. A tecla é escolhida só pelo tipo de evento e pelo valor, então ninguém do chat consegue fazer o app apertar outra coisa.

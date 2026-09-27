@@ -50,6 +50,21 @@
         <div class="col-side">
           <section class="card" id="account-card" aria-live="polite"></section>
 
+          <section class="card" id="profiles-card">
+            <div class="card-head">
+              <h2>Perfis</h2>
+              <button id="profile-add" type="button" class="btn small">+ Novo</button>
+            </div>
+            <p class="hint">Cada perfil tem as suas regras. Só as do perfil ativo disparam.</p>
+            <div id="profiles-list" class="profiles"></div>
+            <div id="profile-detail"></div>
+            <label class="check">
+              <input type="checkbox" id="set-autoswitch" />
+              <span>Trocar de perfil sozinho pelo jogo aberto</span>
+            </label>
+            <p class="hint small" id="autoswitch-note"></p>
+          </section>
+
           <section class="card" id="donations-card">
             <h2>Doações</h2>
             <p class="hint">Conecte o serviço onde você recebe doações para usar regras de “Doação”.</p>
@@ -77,7 +92,7 @@
         <div class="col-main">
           <section class="card">
             <div class="card-head">
-              <h2>Eventos → teclas</h2>
+              <h2>Eventos → teclas <span id="rules-profile" class="tag"></span></h2>
               <div class="row-actions">
                 <input id="rules-search" class="input search" type="search" placeholder="Filtrar regras…"
                   aria-label="Filtrar regras" autocomplete="off" spellcheck="false" />

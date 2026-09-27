@@ -814,6 +814,105 @@ function sourceView(src) {
   return h('details', { class: 'source', open: src.configured || openSources.has(src.name) ? true : null }, h('summary', null, head), ...children.slice(1));
 }
 
+// ------------------------------------------------------------------ perfis
+
+let profilesKey = '';
+
+function renderProfiles() {
+  // Não refaz enquanto o streamer digita o nome ou a lista de programas.
+  const active = document.activeElement;
+  if (active && active.matches && active.matches('#profile-detail input')) return;
+  const key = JSON.stringify([state.profiles, state.activeProfileId, state.autoSwitch]);
+  if (key === profilesKey) return;
+  profilesKey = key;
+
+  $('#profiles-list').replaceChildren(
+    ...state.profiles.map((p) =>
+      h(
+        'button',
+        {
+          class: p.id === state.activeProfileId ? 'profile on' : 'profile',
+          type: 'button',
+          'aria-pressed': p.id === state.activeProfileId,
+          onclick: () => act('setActiveProfile', p.id),
+        },
+        h('span', { class: 'profile-name' }, p.name),
+        h('span', { class: 'profile-count' }, `${p.ruleCount} ${p.ruleCount === 1 ? 'regra' : 'regras'}`)
+      )
+    )
+  );
+  $('#profile-detail').replaceChildren(...profileDetail());
+
+  const auto = state.autoSwitch;
+  const box = $('#set-autoswitch');
+  box.checked = auto.on && auto.supported;
+  box.disabled = !auto.supported;
+  $('#autoswitch-note').textContent = !auto.supported
+    ? 'Só funciona no Windows: é lá que o app consegue ver qual programa está na frente.'
+    : auto.on
+      ? `Em foco agora: ${auto.exe || '—'}. Programa que nenhum perfil lista não troca nada.`
+      : 'Ligue para o perfil seguir o jogo que estiver na frente.';
+
+  $('#rules-profile').textContent = state.profiles.length > 1 ? currentProfile().name : '';
+}
+
+function currentProfile() {
+  return state.profiles.find((p) => p.id === state.activeProfileId) || state.profiles[0];
+}
+
+function profileDetail() {
+  const p = currentProfile();
+  if (!p) return [];
+  const name = h('input', { class: 'input', value: p.name, 'aria-label': 'Nome do perfil', maxlength: 40 });
+  const exe = h('input', {
+    class: 'input mono',
+    value: p.matchExe,
+    placeholder: 'valorant.exe, cs2.exe',
+    'aria-label': 'Programas deste perfil',
+    spellcheck: 'false',
+  });
+  const saveName = () => name.value !== p.name && act('updateProfile', p.id, { name: name.value });
+  const saveExe = () => exe.value !== p.matchExe && act('updateProfile', p.id, { matchExe: exe.value });
+  name.addEventListener('change', saveName);
+  name.addEventListener('keydown', (e) => e.key === 'Enter' && name.blur());
+  exe.addEventListener('change', saveExe);
+  exe.addEventListener('keydown', (e) => e.key === 'Enter' && exe.blur());
+
+  const remove = async () => {
+    if (!confirm(`Apagar o perfil “${p.name}” e as ${p.ruleCount} regras dele?`)) return;
+    await act('removeProfile', p.id);
+  };
+  const exportIt = async () => {
+    const file = await act('exportProfile', p.id);
+    if (file) toast(`Perfil salvo em ${file}`);
+  };
+  const importIt = async () => {
+    const imported = await act('importProfile');
+    if (imported) toast(`Perfil “${imported.name}” importado.`);
+  };
+
+  return [
+    h('div', { class: 'field' }, h('label', null, 'Nome'), name),
+    h(
+      'div',
+      { class: 'field' },
+      h('label', null, 'Programas que ativam este perfil'),
+      exe,
+      h('p', { class: 'hint small' }, 'Separe por vírgula. Vale colar o caminho inteiro do .exe.')
+    ),
+    h(
+      'div',
+      { class: 'btn-row' },
+      h('button', { class: 'btn small', type: 'button', onclick: () => act('duplicateProfile', p.id) }, 'Duplicar'),
+      h('button', { class: 'btn small', type: 'button', onclick: exportIt }, 'Exportar'),
+      h('button', { class: 'btn small', type: 'button', onclick: importIt }, 'Importar'),
+      state.profiles.length > 1
+        ? h('button', { class: 'btn small ghost', type: 'button', onclick: remove }, 'Apagar')
+        : null
+    ),
+  ];
+}
+
 // ------------------------------------------------------------------ preferências
 
 function renderSettings() {
@@ -825,6 +924,11 @@ function renderSettings() {
 }
 
 $('#set-tray').addEventListener('change', (e) => act('updateSettings', { closeToTray: e.target.checked }));
+$('#set-autoswitch').addEventListener('change', (e) => act('updateSettings', { autoSwitch: e.target.checked }));
+$('#profile-add').addEventListener('click', async () => {
+  const profile = await act('addProfile', `Perfil ${state.profiles.length + 1}`);
+  if (profile) act('setActiveProfile', profile.id);
+});
 $('#set-login').addEventListener('change', (e) => act('updateSettings', { openAtLogin: e.target.checked }));
 
 // ------------------------------------------------------------------ ligação
@@ -869,6 +973,7 @@ function render(next) {
   state = next;
   renderTop();
   renderAccount();
+  renderProfiles();
   renderRewardsStatus();
   renderRules();
   renderDonations();

@@ -25,6 +25,15 @@ const { startDeviceFlow, pollDeviceToken, revokeToken, SCOPES } = require('./twi
 const { TwitchApi, HelixError, SessionExpiredError } = require('./twitch/api');
 const { EventSubClient, EVENTSUB_URL } = require('./twitch/eventsub');
 const { DonationHub, CATALOG } = require('./donations');
+const {
+  newProfile,
+  normalizeProfile,
+  normalizeProfiles,
+  profileForExe,
+  exportProfile,
+  importProfile,
+  LIMITS: PROFILE_LIMITS,
+} = require('./profiles');
 const { checkForUpdate } = require('./updates');
 
 const REDEMPTION_TYPE = 'channel.channel_points_custom_reward_redemption.add';
@@ -63,6 +72,7 @@ class Controller extends EventEmitter {
    *   appVersion?: string,
    *   updateUrl?: string,
    *   installer?: (import('node:events').EventEmitter & { download(): Promise<string>, install(): void }) | null,
+   *   foreground?: import('./foreground').ForegroundWatcher | null,
    * }} opts
    *   `installer` (ver autoupdate.js) baixa e instala a versão nova por dentro
    *   do app. Sem ele (portátil, fora do Windows), o aviso leva para a release.
@@ -81,6 +91,7 @@ class Controller extends EventEmitter {
     appVersion = '',
     updateUrl,
     installer = null,
+    foreground = null,
   }) {
     super();
     this.store = store;
@@ -113,6 +124,12 @@ class Controller extends EventEmitter {
       });
     }
     this.pendingTests = new Set(); // "Testar" ainda na contagem
+
+    // Troca automática de perfil pelo programa em foco (só no Windows).
+    this.foreground = foreground || null;
+    if (this.foreground) {
+      this.foreground.on('change', (exe) => this.foregroundChanged(exe));
+    }
 
     this.donations = new DonationHub({ deps: donationDeps });
     this.donations.on('change', () => this.changed());
@@ -147,6 +164,18 @@ class Controller extends EventEmitter {
     return this.envClientId || this.config.clientId || this.defaultClientId;
   }
 
+  /** O perfil ativo. Sempre existe: a normalização garante pelo menos um. */
+  get profile() {
+    return (
+      this.config.profiles.find((p) => p.id === this.config.activeProfileId) || this.config.profiles[0]
+    );
+  }
+
+  /** As regras que valem agora, isto é, as do perfil ativo. */
+  get rules() {
+    return this.profile.rules;
+  }
+
   changed() {
     if (this.emitScheduled) return;
     this.emitScheduled = true;
@@ -168,7 +197,19 @@ class Controller extends EventEmitter {
       rewards: this.rewards,
       rewardsStatus: this.rewardsStatus,
       rewardsError: this.rewardsError,
-      rules: this.config.rules,
+      rules: this.rules,
+      profiles: this.config.profiles.map((p) => ({
+        id: p.id,
+        name: p.name,
+        matchExe: p.matchExe,
+        ruleCount: p.rules.length,
+      })),
+      activeProfileId: this.profile.id,
+      autoSwitch: {
+        on: !!this.config.settings.autoSwitch,
+        supported: !!(this.foreground && this.foreground.supported),
+        exe: this.foreground ? this.foreground.current : '',
+      },
       paused: this.config.paused,
       settings: this.config.settings,
       queue: this.runner.pending,
@@ -222,7 +263,8 @@ class Controller extends EventEmitter {
   /** Lê a configuração do disco. Síncrono: a janela já pode pedir o estado. */
   load() {
     this.config = this.store.loadConfig();
-    this.config.rules = this.config.rules.map(normalizeRule);
+    Object.assign(this.config, normalizeProfiles(this.config));
+    delete this.config.rules; // formato antigo: virou o perfil "Padrão"
     if (this.store.restoredFrom) {
       this.error(`O config.json não abriu; as regras vieram da cópia ${this.store.restoredFrom}.`);
     }
@@ -241,6 +283,7 @@ class Controller extends EventEmitter {
       clearInterval(this.updateTimer);
       this.updateTimer = setInterval(() => this.checkUpdates(), UPDATE_CHECK_EVERY_MS);
     }
+    this.applyAutoSwitch();
     for (const [name, creds] of Object.entries(this.donationCreds)) {
       if (CATALOG[name]) this.donations.connect(name, creds);
     }
@@ -558,7 +601,7 @@ class Controller extends EventEmitter {
       target: ev.target,
       via: ev.via || '',
     };
-    const rules = matchRules(this.config.rules, ev);
+    const rules = matchRules(this.rules, ev);
     if (rules.length === 0) {
       this.addLog({ ...base, outcome: 'ignored' });
       return;
@@ -594,7 +637,7 @@ class Controller extends EventEmitter {
       // Mantém o título guardado nas regras em dia (é o que aparece se a
       // recompensa for apagada depois).
       let touched = false;
-      for (const rule of this.config.rules) {
+      for (const rule of this.rules) {
         const r = this.rewards.find((x) => x.id === rule.rewardId);
         if (r && r.title !== rule.rewardTitle) {
           rule.rewardTitle = r.title;
@@ -613,17 +656,140 @@ class Controller extends EventEmitter {
     this.changed();
   }
 
+  // ---------------------------------------------------------------- perfis
+
+  findProfile(id) {
+    const profile = this.config.profiles.find((p) => p.id === id);
+    if (!profile) throw new Error('Perfil não encontrado.');
+    return profile;
+  }
+
+  /** Troca o perfil ativo. `why` aparece no registro na troca automática. */
+  setActiveProfile(id, why = '') {
+    const profile = this.findProfile(id);
+    if (profile.id === this.config.activeProfileId) return profile;
+    // Regra do perfil velho não pode ficar apertando tecla depois da troca.
+    this.runner.abortAll();
+    this.cancelTests();
+    this.config.activeProfileId = profile.id;
+    this.save();
+    this.info(`Perfil: ${profile.name}${why ? ` (${why})` : ''}.`);
+    this.changed();
+    return profile;
+  }
+
+  addProfile(name) {
+    if (this.config.profiles.length >= PROFILE_LIMITS.profiles) {
+      throw new Error(`São no máximo ${PROFILE_LIMITS.profiles} perfis.`);
+    }
+    const profile = newProfile(name);
+    this.config.profiles.push(profile);
+    this.save();
+    this.changed();
+    return profile;
+  }
+
+  /** Copia o perfil inteiro, com as regras. Bom para variar sem perder o original. */
+  duplicateProfile(id) {
+    const source = this.findProfile(id);
+    // Sem o matchExe: dois perfis com o mesmo jogo fariam a troca automática
+    // escolher um deles sem o streamer entender por quê.
+    return this.addProfileFrom({ ...source, matchExe: '', name: `${source.name} (cópia)` });
+  }
+
+  /**
+   * Põe na configuração um perfil vindo de fora (cópia ou arquivo). Ids novos
+   * no perfil e em cada regra: duas regras com o mesmo id em perfis
+   * diferentes seriam a mesma regra para quem procura pelo id.
+   */
+  addProfileFrom(raw) {
+    if (this.config.profiles.length >= PROFILE_LIMITS.profiles) {
+      throw new Error(`São no máximo ${PROFILE_LIMITS.profiles} perfis.`);
+    }
+    const rules = (Array.isArray(raw.rules) ? raw.rules : []).map((r) => ({ ...r, id: undefined }));
+    const profile = normalizeProfile({ ...raw, id: undefined, rules });
+    this.config.profiles.push(profile);
+    this.save();
+    this.changed();
+    return profile;
+  }
+
+  updateProfile(id, patch) {
+    const current = this.findProfile(id);
+    const p = patch && typeof patch === 'object' ? patch : {};
+    const next = normalizeProfile({
+      ...current,
+      ...(typeof p.name === 'string' ? { name: p.name } : {}),
+      ...(typeof p.matchExe === 'string' ? { matchExe: p.matchExe } : {}),
+    });
+    Object.assign(current, next);
+    this.save();
+    this.changed();
+    return { id: current.id, name: current.name, matchExe: current.matchExe };
+  }
+
+  removeProfile(id) {
+    this.findProfile(id);
+    if (this.config.profiles.length === 1) throw new Error('É preciso ter pelo menos um perfil.');
+    this.config.profiles = this.config.profiles.filter((p) => p.id !== id);
+    // Apagou o ativo: cai para o primeiro que sobrou.
+    if (!this.config.profiles.some((p) => p.id === this.config.activeProfileId)) {
+      this.config.activeProfileId = this.config.profiles[0].id;
+      this.runner.abortAll();
+      this.cancelTests();
+    }
+    this.save();
+    this.changed();
+  }
+
+  /** O perfil ativo no formato do arquivo de exportação (sem nada secreto). */
+  exportProfile(id) {
+    return exportProfile(this.findProfile(id));
+  }
+
+  /** Cria um perfil a partir de um arquivo exportado e deixa ele ativo. */
+  importProfile(data, opts) {
+    const profile = this.addProfileFrom(importProfile(data, opts));
+    this.setActiveProfile(profile.id);
+    this.info(`Perfil "${profile.name}" importado com ${profile.rules.length} regras.`);
+    return profile;
+  }
+
+  /** Liga ou desliga o vigia do app em foco conforme a preferência. */
+  applyAutoSwitch() {
+    if (!this.foreground) return;
+    if (this.config.settings.autoSwitch) {
+      this.foreground.start();
+      // Já entra no perfil do que estiver aberto agora.
+      this.foregroundChanged(this.foreground.current);
+    } else {
+      this.foreground.stop();
+    }
+  }
+
+  foregroundChanged(exe) {
+    if (!this.config.settings.autoSwitch) return;
+    const profile = profileForExe(this.config.profiles, exe);
+    // Programa que nenhum perfil lista (navegador, OBS…) não troca nada: o
+    // streamer continua no perfil em que estava.
+    if (profile) this.setActiveProfile(profile.id, exe);
+    else this.changed(); // a tela mostra o que está em foco
+  }
+
   // ---------------------------------------------------------------- regras
 
   findRule(id) {
-    const rule = this.config.rules.find((r) => r.id === id);
+    const rule = this.rules.find((r) => r.id === id);
     if (!rule) throw new Error('Regra não encontrada.');
     return rule;
   }
 
   addRule() {
     const rule = newRule();
-    this.config.rules.push(rule);
+    if (this.rules.length >= PROFILE_LIMITS.rules) {
+      throw new Error(`Um perfil guarda no máximo ${PROFILE_LIMITS.rules} regras.`);
+    }
+    this.rules.push(rule);
     this.save();
     this.changed();
     return rule;
@@ -637,7 +803,7 @@ class Controller extends EventEmitter {
       p.rewardTitle = reward ? reward.title : p.rewardId ? current.rewardTitle : '';
     }
     const next = patchRule(current, p);
-    this.config.rules = this.config.rules.map((r) => (r.id === id ? next : r));
+    this.profile.rules = this.rules.map((r) => (r.id === id ? next : r));
     this.save();
     this.changed();
     return next;
@@ -645,7 +811,7 @@ class Controller extends EventEmitter {
 
   removeRule(id) {
     this.findRule(id);
-    this.config.rules = this.config.rules.filter((r) => r.id !== id);
+    this.profile.rules = this.rules.filter((r) => r.id !== id);
     this.save();
     this.changed();
   }
@@ -799,11 +965,12 @@ class Controller extends EventEmitter {
   }
 
   updateSettings(patch) {
-    const allowed = ['closeToTray', 'openAtLogin'];
+    const allowed = ['closeToTray', 'openAtLogin', 'autoSwitch'];
     for (const key of allowed) {
       if (patch && typeof patch[key] === 'boolean') this.config.settings[key] = patch[key];
     }
     this.save();
+    this.applyAutoSwitch();
     this.emit('settings', this.config.settings);
     this.changed();
   }
@@ -813,6 +980,7 @@ class Controller extends EventEmitter {
     clearInterval(this.validateTimer);
     clearInterval(this.updateTimer);
     this.cancelTests();
+    if (this.foreground) this.foreground.stop();
     this.cancelLogin();
     if (this.eventsub) this.eventsub.stop();
     this.donations.stopAll();

@@ -2,10 +2,12 @@
 // entre a tela e o Controller. A lógica de verdade mora no controller.js.
 
 const path = require('node:path');
+const fs = require('node:fs');
 const {
   app,
   BrowserWindow,
   Menu,
+  dialog,
   Notification,
   Tray,
   ipcMain,
@@ -18,6 +20,7 @@ const { Controller } = require('./controller');
 const { Store } = require('./store');
 const { createKeyboard, createSimulatedKeyboard } = require('./keyboard');
 const { createInstaller } = require('./autoupdate');
+const { createForegroundWatcher } = require('./foreground');
 const pkg = require('../../package.json');
 
 const APP_ID = 'app.asrus.keybinds-redemptions';
@@ -170,6 +173,49 @@ function buildKeyboard() {
   }
 }
 
+// Perfis vão e voltam como arquivo .json escolhido pelo streamer. A tela não
+// toca em disco: ela só pede, e o caminho vem do diálogo do próprio Windows.
+const PROFILE_FILTERS = [{ name: 'Perfil do Keybinds Redemptions', extensions: ['json'] }];
+const MAX_PROFILE_BYTES = 2 * 1024 * 1024;
+
+function safeFileName(name) {
+  return (name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '-').trim() || 'perfil').slice(0, 60);
+}
+
+/** Salva o perfil num .json. Devolve o caminho, ou '' se o streamer desistiu. */
+async function saveProfileFile(id) {
+  const data = controller.exportProfile(id);
+  const { canceled, filePath } = await dialog.showSaveDialog(win, {
+    title: 'Exportar perfil',
+    defaultPath: `${safeFileName(data.name)}.json`,
+    filters: PROFILE_FILTERS,
+  });
+  if (canceled || !filePath) return '';
+  await fs.promises.writeFile(filePath, JSON.stringify(data, null, 2));
+  return filePath;
+}
+
+/** Lê um .json exportado e cria o perfil. Devolve null se o streamer desistiu. */
+async function openProfileFile() {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: 'Importar perfil',
+    filters: PROFILE_FILTERS,
+    properties: ['openFile'],
+  });
+  if (canceled || !filePaths[0]) return null;
+  const { size } = await fs.promises.stat(filePaths[0]);
+  // Um perfil tem alguns KB; arquivo enorme aqui é engano, e ler inteiro na
+  // memória antes de descobrir isso seria pior.
+  if (size > MAX_PROFILE_BYTES) throw new Error('Arquivo grande demais para ser um perfil.');
+  let data;
+  try {
+    data = JSON.parse(await fs.promises.readFile(filePaths[0], 'utf8'));
+  } catch {
+    throw new Error('O arquivo não é um JSON válido.');
+  }
+  return controller.importProfile(data);
+}
+
 // Métodos que a tela pode chamar. Nada fora desta lista passa pelo IPC.
 function ipcApi() {
   return {
@@ -194,6 +240,13 @@ function ipcApi() {
     setPaused: (paused) => controller.setPaused(paused),
     stopAll: () => controller.stopAll(),
     updateSettings: (patch) => controller.updateSettings(patch),
+    setActiveProfile: (id) => controller.setActiveProfile(id),
+    addProfile: (name) => controller.addProfile(name),
+    duplicateProfile: (id) => controller.duplicateProfile(id),
+    updateProfile: (id, patch) => controller.updateProfile(id, patch),
+    removeProfile: (id) => controller.removeProfile(id),
+    exportProfile: (id) => saveProfileFile(id),
+    importProfile: () => openProfileFile(),
     connectDonation: (name, credentials) => controller.connectDonation(name, credentials),
     disconnectDonation: (name) => controller.disconnectDonation(name),
     dismissNotice: () => controller.setNotice(''),
@@ -257,6 +310,7 @@ async function start() {
     defaultClientId: pkg.twitchClientId || '',
     appVersion: app.getVersion(),
     installer: createInstaller({ app, log: (m) => console.warn(m) }),
+    foreground: createForegroundWatcher({ log: (m) => console.warn(m) }),
   });
 
   controller.load();
