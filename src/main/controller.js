@@ -18,6 +18,7 @@ const {
   describeTrigger,
   formatMoney,
   actionOf,
+  keysOf,
   TIER_LABELS,
   SOURCE_LABELS,
 } = require('./rules');
@@ -79,7 +80,9 @@ class Controller extends EventEmitter {
    *   updateUrl?: string,
    *   installer?: (import('node:events').EventEmitter & { download(): Promise<string>, install(): void }) | null,
    *   foreground?: import('./foreground').ForegroundWatcher | null,
+   *   effects?: { open(text: string): void, url(text: string): void },
    * }} opts
+   *   `effects` abre arquivo e link nos passos que não são de tecla.
    *   `installer` (ver autoupdate.js) baixa e instala a versão nova por dentro
    *   do app. Sem ele (portátil, fora do Windows), o aviso leva para a release.
    */
@@ -98,6 +101,7 @@ class Controller extends EventEmitter {
     updateUrl,
     installer = null,
     foreground = null,
+    effects,
   }) {
     super();
     this.store = store;
@@ -110,8 +114,9 @@ class Controller extends EventEmitter {
     this.defaultClientId = defaultClientId.trim();
     this.testDelayMs = testDelayMs;
 
-    this.runner = new ActionRunner({ keyboard });
+    this.runner = new ActionRunner({ keyboard, effects });
     this.runner.on('change', () => this.changed());
+    this.runner.on('log', (m) => this.info(m));
 
     this.appVersion = appVersion;
     this.updateUrl = updateUrl;
@@ -639,14 +644,14 @@ class Controller extends EventEmitter {
       return;
     }
     if (this.config.paused) {
-      this.addLog({ ...base, keys: rules[0].keys, outcome: 'paused' });
+      this.addLog({ ...base, steps: rules[0].steps, keys: keysOf(rules[0]), outcome: 'paused' });
       return;
     }
     for (const rule of rules) this.run(rule, base);
   }
 
   run(rule, logBase) {
-    const entry = this.addLog({ ...logBase, ruleId: rule.id, keys: rule.keys, outcome: 'queued' });
+    const entry = this.addLog({ ...logBase, ruleId: rule.id, steps: rule.steps, keys: keysOf(rule), outcome: 'queued' });
     return this.runner.enqueue(actionOf(rule)).then((res) => {
       this.updateLog(entry.id, {
         outcome: res.ok ? 'done' : res.aborted ? 'aborted' : 'error',
@@ -854,7 +859,7 @@ class Controller extends EventEmitter {
    */
   async testRule(id) {
     const rule = this.findRule(id);
-    if (!rule.keys.length) throw new Error('Escolha uma tecla antes de testar.');
+    if (!rule.steps.length) throw new Error('Escolha o que a regra faz antes de testar.');
     // O "Parar tudo" também cancela um teste que ainda está na contagem.
     const go = await new Promise((resolve) => {
       const item = {
@@ -868,7 +873,7 @@ class Controller extends EventEmitter {
     });
     const base = { kind: 'test', target: describeTrigger(rule) };
     if (!go) {
-      this.addLog({ ...base, ruleId: rule.id, keys: rule.keys, outcome: 'aborted' });
+      this.addLog({ ...base, ruleId: rule.id, steps: rule.steps, keys: keysOf(rule), outcome: 'aborted' });
       return { ok: false, aborted: true };
     }
     return this.run(rule, base);

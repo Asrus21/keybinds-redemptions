@@ -128,20 +128,26 @@
     </div>
 
     <dialog id="key-dialog" aria-labelledby="key-dialog-title">
-      <h3 id="key-dialog-title">Qual tecla apertar?</h3>
+      <h3 id="key-dialog-title">O que esta regra faz?</h3>
       <p class="hint" id="key-dialog-reward"></p>
+      <ol id="steps-list" class="steps"></ol>
+      <p class="hint small" id="steps-empty">Nenhum passo ainda. Aperte uma tecla abaixo para começar.</p>
       <div id="capture" class="capture" tabindex="0" role="textbox" aria-label="Aperte a tecla ou combinação">
         <div id="capture-keys" class="chips big"></div>
         <p id="capture-hint">Aperte a tecla ou a combinação agora (ex.: Ctrl + G)</p>
       </div>
-      <div class="or"><span>ou escolha da lista</span></div>
       <div class="picker">
         <select id="key-select" class="select" aria-label="Escolher tecla da lista"></select>
-        <button id="key-add" type="button" class="btn">Adicionar</button>
+        <button id="key-add" type="button" class="btn">Adicionar tecla</button>
+      </div>
+      <div class="or"><span>ou adicione outro tipo de passo</span></div>
+      <div class="btn-row">
+        <button id="step-open" type="button" class="btn small">+ Abrir arquivo ou programa</button>
+        <button id="step-url" type="button" class="btn small">+ Abrir link</button>
       </div>
       <p class="hint small">Esc fecha esta janela. Para usar a tecla Esc, escolha na lista.</p>
       <div class="dialog-actions">
-        <button id="key-clear" type="button" class="btn ghost">Limpar</button>
+        <button id="key-clear" type="button" class="btn ghost">Limpar tudo</button>
         <span class="spacer"></span>
         <button id="key-cancel" type="button" class="btn">Cancelar</button>
         <button id="key-save" type="button" class="btn primary">Salvar</button>

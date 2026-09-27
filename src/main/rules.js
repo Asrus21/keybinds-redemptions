@@ -26,6 +26,21 @@ const COMMAND_MAX = 30;
 const TIERS = ['any', '1000', '2000', '3000'];
 const DONATION_SOURCES = ['any', 'streamelements', 'streamlabs', 'livepix', 'pixgg'];
 
+// O que uma regra faz é uma SEQUÊNCIA de passos, não uma tecla só: dá para
+// apertar Ctrl+G, esperar meio segundo e apertar W. Cada passo diz quanto
+// tempo segurar e quanto esperar depois dele.
+//
+//   keys — aperta uma combinação
+//   open — abre um arquivo ou programa (o .bat do OBS, por exemplo)
+//   url  — abre um link no navegador
+//
+// `open` e `url` saem pelo shell do Electron, sem interpretador de comandos no
+// meio: não existe linha de comando para alguém injetar coisa. E o caminho é
+// sempre o que o streamer escolheu na regra — nada vem do chat nem da doação.
+const STEP_KINDS = ['keys', 'open', 'url'];
+const STEP_TEXT_MAX = 500;
+const MAX_STEPS = 20;
+
 const LIMITS = {
   // Jogo lê o teclado uma vez por frame; toque mais curto que ~2 frames pode
   // não ser visto. 60 ms cobre até jogo rodando a 30 fps.
@@ -67,6 +82,36 @@ function normalizeAmount(value, trigger, { allowZero = false } = {}) {
   return round(Math.min(spec.max, Math.max(spec.min, n)), spec.decimals);
 }
 
+function normalizeStep(raw) {
+  const st = raw && typeof raw === 'object' ? raw : {};
+  const kind = STEP_KINDS.includes(st.kind) ? st.kind : 'keys';
+  return {
+    kind,
+    keys: kind === 'keys' ? normalizeCombo(st.keys) : [],
+    text: kind === 'keys' ? '' : cleanText(st.text, STEP_TEXT_MAX),
+    holdMs: clampInt(st.holdMs, LIMITS.holdMs),
+    gapMs: clampInt(st.gapMs, LIMITS.gapMs),
+  };
+}
+
+/** Um passo sem tecla (ou sem caminho) não faz nada; fora da lista. */
+function stepIsComplete(step) {
+  return step.kind === 'keys' ? step.keys.length > 0 : step.text !== '';
+}
+
+/**
+ * Passos de uma regra, aceitando o formato antigo (uma tecla solta em
+ * `keys`/`holdMs`/`gapMs`), que vira um passo só.
+ */
+function normalizeSteps(rule) {
+  if (Array.isArray(rule.steps)) {
+    return rule.steps.slice(0, MAX_STEPS).map(normalizeStep).filter(stepIsComplete);
+  }
+  const keys = normalizeCombo(rule.keys);
+  if (keys.length === 0) return [];
+  return [normalizeStep({ kind: 'keys', keys, holdMs: rule.holdMs, gapMs: rule.gapMs })];
+}
+
 function cleanText(value, max) {
   return typeof value === 'string' ? value.trim().slice(0, max) : '';
 }
@@ -105,10 +150,8 @@ function normalizeRule(raw) {
     source: DONATION_SOURCES.includes(r.source) ? r.source : 'any',
     command: cleanCommand(r.command),
     who: CHATTERS.includes(r.who) ? r.who : 'all',
-    keys: normalizeCombo(r.keys),
-    holdMs: clampInt(r.holdMs, LIMITS.holdMs),
+    steps: normalizeSteps(r),
     repeat: clampInt(r.repeat, LIMITS.repeat),
-    gapMs: clampInt(r.gapMs, LIMITS.gapMs),
   };
 }
 
@@ -117,11 +160,29 @@ function patchRule(rule, patch) {
   const p = patch && typeof patch === 'object' ? patch : {};
   const editable = [
     'enabled', 'trigger', 'rewardId', 'rewardTitle', 'min', 'max', 'tier', 'source',
-    'command', 'who', 'keys', 'holdMs', 'repeat', 'gapMs',
+    'command', 'who', 'steps', 'repeat',
   ];
   const next = { ...rule };
   for (const field of editable) {
     if (Object.prototype.hasOwnProperty.call(p, field)) next[field] = p[field];
+  }
+  // Atalho para o caso comum, que é o de quase toda regra: uma combinação só.
+  // `keys` (com holdMs/gapMs opcionais) troca a sequência inteira por um passo.
+  // Com dois ou mais passos, a sequência só muda mandando `steps` inteiro, para
+  // um "segurar" solto não apagar o resto sem querer.
+  const shortcut = ['keys', 'holdMs', 'gapMs'].some((f) =>
+    Object.prototype.hasOwnProperty.call(p, f)
+  );
+  if (!('steps' in p) && shortcut && rule.steps.length <= 1) {
+    const base = rule.steps[0] && rule.steps[0].kind === 'keys' ? rule.steps[0] : {};
+    next.steps = [
+      {
+        kind: 'keys',
+        keys: 'keys' in p ? p.keys : base.keys,
+        holdMs: 'holdMs' in p ? p.holdMs : base.holdMs,
+        gapMs: 'gapMs' in p ? p.gapMs : base.gapMs,
+      },
+    ];
   }
   // Trocou o tipo de gatilho: a faixa antiga não faz sentido no novo
   // (100 bits ≠ R$ 100), então volta para o padrão dele.
@@ -134,7 +195,7 @@ function patchRule(rule, patch) {
 
 /** Uma regra só dispara se estiver ligada e completa. */
 function isRunnable(rule) {
-  if (!rule.enabled || rule.keys.length === 0) return false;
+  if (!rule.enabled || rule.steps.length === 0) return false;
   if (rule.trigger === 'reward') return rule.rewardId !== '';
   if (rule.trigger === 'command') return rule.command !== '';
   return true;
@@ -217,10 +278,21 @@ function describeTrigger(rule) {
 }
 
 function actionOf(rule) {
-  return { keys: rule.keys, holdMs: rule.holdMs, repeat: rule.repeat, gapMs: rule.gapMs };
+  return { steps: rule.steps, repeat: rule.repeat };
+}
+
+/** As teclas de todos os passos, na ordem — para a tela e o registro. */
+function keysOf(rule) {
+  return rule.steps.filter((s) => s.kind === 'keys').flatMap((s) => s.keys);
 }
 
 module.exports = {
+  STEP_KINDS,
+  STEP_TEXT_MAX,
+  MAX_STEPS,
+  normalizeStep,
+  normalizeSteps,
+  keysOf,
   TRIGGERS,
   TIERS,
   CHATTERS,

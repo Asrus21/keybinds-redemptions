@@ -1,7 +1,7 @@
 {
   "name": "keybinds-redemptions",
   "productName": "Keybinds Redemptions",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Aperta uma tecla no PC do streamer em resgates, bits, subs, gift subs e doações da live.",
   "author": "Thiago Arruda <tarruda1513@gmail.com>",
   "private": true,

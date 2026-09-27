@@ -5,7 +5,8 @@ const { ActionRunner } = require('../src/main/runner');
 const { createSimulatedKeyboard } = require('../src/main/keyboard');
 
 function action(keys, extra = {}) {
-  return { keys, holdMs: 10, repeat: 1, gapMs: 0, ...extra };
+  const { holdMs = 10, repeat = 1, gapMs = 0 } = extra;
+  return { steps: [{ kind: 'keys', keys, holdMs, gapMs }], repeat };
 }
 
 test('aperta a combinação em ordem e solta ao contrário', async () => {
@@ -117,4 +118,88 @@ test('"Parar tudo" solta todas as teclas na mesma hora (o app pode estar fechand
   ]);
   assert.deepEqual(await run, { ok: false, aborted: true });
   assert.equal(kb.events.length, 6, 'nada é solto duas vezes');
+});
+
+test('sequência: passos na ordem, com a espera de cada um', async () => {
+  const kb = createSimulatedKeyboard();
+  const runner = new ActionRunner({ keyboard: kb });
+  const t0 = Date.now();
+  await runner.enqueue({
+    steps: [
+      { kind: 'keys', keys: ['ControlLeft', 'KeyG'], holdMs: 10, gapMs: 60 },
+      { kind: 'keys', keys: ['KeyW'], holdMs: 10, gapMs: 0 },
+    ],
+    repeat: 1,
+  });
+  assert.deepEqual(kb.events, [
+    ['down', 'ControlLeft'],
+    ['down', 'KeyG'],
+    ['up', 'KeyG'],
+    ['up', 'ControlLeft'],
+    ['down', 'KeyW'],
+    ['up', 'KeyW'],
+  ]);
+  assert.ok(Date.now() - t0 >= 60, 'esperou entre os passos');
+});
+
+test('sequência: abrir arquivo e link saem pelos effects, na ordem certa', async () => {
+  const kb = createSimulatedKeyboard();
+  const feitos = [];
+  const runner = new ActionRunner({
+    keyboard: kb,
+    effects: { open: (t) => feitos.push(['open', t]), url: (t) => feitos.push(['url', t]) },
+  });
+  const res = await runner.enqueue({
+    steps: [
+      { kind: 'open', text: 'C:\\OBS\\cena.bat', holdMs: 60, gapMs: 0 },
+      { kind: 'keys', keys: ['F13'], holdMs: 10, gapMs: 0 },
+      { kind: 'url', text: 'https://exemplo.test', holdMs: 60, gapMs: 0 },
+    ],
+    repeat: 1,
+  });
+  assert.deepEqual(res, { ok: true });
+  assert.deepEqual(feitos, [['open', 'C:\\OBS\\cena.bat'], ['url', 'https://exemplo.test']]);
+  assert.deepEqual(kb.events, [['down', 'F13'], ['up', 'F13']]);
+});
+
+test('sequência repetida não espera depois do último passo da última volta', async () => {
+  const runner = new ActionRunner({ keyboard: createSimulatedKeyboard() });
+  const t0 = Date.now();
+  await runner.enqueue({
+    steps: [{ kind: 'keys', keys: ['KeyA'], holdMs: 5, gapMs: 120 }],
+    repeat: 2,
+  });
+  const levou = Date.now() - t0;
+  // Duas voltas com uma espera só entre elas: perto de 120 ms, não de 240.
+  assert.ok(levou >= 110, `esperou entre as voltas (${levou} ms)`);
+  assert.ok(levou < 230, `não esperou depois da última (${levou} ms)`);
+});
+
+test('"Parar tudo" no meio de uma sequência não deixa o passo seguinte rodar', async () => {
+  const kb = createSimulatedKeyboard();
+  const feitos = [];
+  const runner = new ActionRunner({
+    keyboard: kb,
+    effects: { open: (t) => feitos.push(t), url: (t) => feitos.push(t) },
+  });
+  const run = runner.enqueue({
+    steps: [
+      { kind: 'keys', keys: ['KeyA'], holdMs: 60_000, gapMs: 0 },
+      { kind: 'open', text: 'nao-devia-abrir.bat', holdMs: 60, gapMs: 0 },
+    ],
+    repeat: 1,
+  });
+  await new Promise((r) => setTimeout(r, 30));
+  runner.abortAll();
+  assert.deepEqual(await run, { ok: false, aborted: true });
+  assert.deepEqual(feitos, [], 'o passo de abrir arquivo não chegou a rodar');
+  assert.deepEqual(kb.events.at(-1), ['up', 'KeyA'], 'a tecla foi solta');
+});
+
+test('sem effects, os passos de abrir só avisam no registro', async () => {
+  const runner = new ActionRunner({ keyboard: createSimulatedKeyboard() });
+  const avisos = [];
+  runner.on('log', (m) => avisos.push(m));
+  await runner.enqueue({ steps: [{ kind: 'url', text: 'https://x.test', holdMs: 60, gapMs: 0 }], repeat: 1 });
+  assert.match(avisos.join(' '), /abriria o link https:\/\/x\.test/);
 });

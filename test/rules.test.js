@@ -115,3 +115,55 @@ test('trocar para comando e voltar não deixa lixo na faixa', () => {
   const back = patchRule(cmd, { trigger: 'bits' });
   assert.equal(back.min, 100, 'volta para o padrão de bits');
 });
+
+test('sequência de passos: migração do formato antigo e limpeza', () => {
+  // Regra salva antes dos passos existirem: a tecla vira um passo só.
+  const velha = normalizeRule({ keys: ['ControlLeft', 'KeyG'], holdMs: 80, gapMs: 250, repeat: 3 });
+  assert.deepEqual(velha.steps, [
+    { kind: 'keys', keys: ['ControlLeft', 'KeyG'], text: '', holdMs: 80, gapMs: 250 },
+  ]);
+  assert.equal(velha.repeat, 3);
+  assert.equal(normalizeRule({ keys: [] }).steps.length, 0, 'regra nova nasce sem passo');
+
+  // Passo sem tecla (ou sem caminho) não faz nada: sai da lista.
+  const limpa = normalizeRule({
+    steps: [
+      { kind: 'keys', keys: ['KeyA'] },
+      { kind: 'keys', keys: [] },
+      { kind: 'url', text: '' },
+      { kind: 'open', text: 'C:\\x.bat' },
+      { kind: 'inventado', keys: ['KeyB'] },
+    ],
+  });
+  assert.deepEqual(limpa.steps.map((s) => s.kind), ['keys', 'open', 'keys']);
+  assert.equal(limpa.steps[1].keys.length, 0, 'passo de abrir não guarda tecla');
+  assert.equal(limpa.steps[0].text, '', 'passo de tecla não guarda texto');
+
+  // Sem passo nenhum a regra não roda; com um passo de link, roda.
+  assert.equal(isRunnable(normalizeRule({ enabled: true, trigger: 'sub', steps: [] })), false);
+  assert.equal(
+    isRunnable(normalizeRule({ enabled: true, trigger: 'sub', steps: [{ kind: 'url', text: 'https://x' }] })),
+    true,
+    'uma regra pode só abrir um link, sem tecla nenhuma'
+  );
+});
+
+test('atalho `keys` no patch vale para um passo, mas não apaga uma sequência', () => {
+  const uma = normalizeRule({ keys: ['KeyA'], holdMs: 30 });
+  const trocada = patchRule(uma, { keys: ['KeyB'] });
+  assert.deepEqual(trocada.steps.map((s) => s.keys), [['KeyB']]);
+  assert.equal(trocada.steps[0].holdMs, 30, 'o tempo do passo continua');
+
+  const sequencia = normalizeRule({
+    steps: [{ kind: 'keys', keys: ['KeyA'] }, { kind: 'keys', keys: ['KeyB'] }],
+  });
+  const tentativa = patchRule(sequencia, { holdMs: 999 });
+  assert.equal(tentativa.steps.length, 2, 'um "segurar" solto não colapsa a sequência');
+  const explicita = patchRule(sequencia, { steps: [{ kind: 'keys', keys: ['KeyC'] }] });
+  assert.equal(explicita.steps.length, 1, 'mandando steps, troca de verdade');
+});
+
+test('a regra guarda no máximo 20 passos', () => {
+  const muitos = Array.from({ length: 30 }, () => ({ kind: 'keys', keys: ['KeyA'] }));
+  assert.equal(normalizeRule({ steps: muitos }).steps.length, 20);
+});
