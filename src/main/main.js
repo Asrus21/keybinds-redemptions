@@ -17,6 +17,7 @@ const {
 const { Controller } = require('./controller');
 const { Store } = require('./store');
 const { createKeyboard, createSimulatedKeyboard } = require('./keyboard');
+const { createInstaller } = require('./autoupdate');
 const pkg = require('../../package.json');
 
 const APP_ID = 'app.asrus.keybinds-redemptions';
@@ -198,6 +199,8 @@ function ipcApi() {
     dismissNotice: () => controller.setNotice(''),
     dismissUpdate: () => controller.dismissUpdate(),
     openUpdate: () => controller.update && openExternal(controller.update.url),
+    // Fecha, instala em silêncio e abre de novo (o before-quit solta as teclas).
+    installUpdate: () => controller.installUpdate(),
     openExternal: (url) => openExternal(url),
   };
 }
@@ -251,6 +254,7 @@ async function start() {
     envClientId: process.env.TWITCH_CLIENT_ID || '',
     defaultClientId: pkg.twitchClientId || '',
     appVersion: app.getVersion(),
+    installer: createInstaller({ app, log: (m) => console.warn(m) }),
   });
 
   controller.load();

@@ -403,3 +403,26 @@ test('Twitch recusa bits/subs (403): resgates seguem funcionando, com aviso', as
   assert.equal(errors.length, 4);
   assert.match(errors.join('\n'), /bits: subscription missing proper authorization/);
 });
+
+test('"Parar tudo" cancela o teste que ainda está na contagem e diz quantas parou', async (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'kr-ctrl-'));
+  const kb = createSimulatedKeyboard();
+  const pressed = [];
+  kb.keyDown = (c) => pressed.push(c);
+  kb.keyUp = () => {};
+  const ctrl = new Controller({ store: new Store({ dir }), keyboard: kb, fetch: async () => new Response('{}'), testDelayMs: 5000 });
+  t.after(() => ctrl.dispose());
+  ctrl.load();
+  const rule = ctrl.addRule();
+  ctrl.updateRule(rule.id, { keys: ['KeyG'], holdMs: 10 });
+
+  assert.equal(ctrl.stopAll(), 0, 'nada rodando');
+  const started = Date.now();
+  const test1 = ctrl.testRule(rule.id);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(ctrl.stopAll(), 1);
+  assert.deepEqual(await test1, { ok: false, aborted: true });
+  assert.ok(Date.now() - started < 1000, 'não esperou a contagem');
+  assert.deepEqual(pressed, [], 'nenhuma tecla apertada');
+  assert.ok(ctrl.getLog().some((e) => e.kind === 'test' && e.outcome === 'aborted'));
+});
